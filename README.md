@@ -2,7 +2,6 @@
 
 从临床试验论文 PDF 中自动提取药物关系、试验结构与效应估计，生成符合统一 schema 的 JSON 输出。
 
----
 
 ## 核心流程
 
@@ -16,44 +15,44 @@ PDF 论文
          │
          ▼
 ┌──────────────────────────┐
-│  Step 1: 注册信息 + 设计  │  → trial_linkage (NCT/DOI/PMID)
+│  Step 1: 注册信息 + 设计   │  → trial_linkage (NCT/DOI/PMID)
 │                          │  → design (randomized/blinding/allocation/multicenter)
 └────────┬─────────────────┘
          │
          ▼
 ┌──────────────────────────┐
 │  Step 2: PICO            │  → population (base + analysis populations)
-│  + 硬匹配验证             │  → intervention / comparator / outcomes
-│  + 一致性检查             │  → sub-pop sample_size ≤ base sample_size
-│  + Review（如有错误）     │  → LLM 修正不可追溯的数值
+│  + 硬匹配验证              │  → intervention / comparator / outcomes
+│  + 一致性检查              │  → sub-pop sample_size ≤ base sample_size
+│  + Review（如有错误）      │  → LLM 修正不可追溯的数值
 └────────┬─────────────────┘
          │  ← 独立调用
          ▼
 ┌──────────────────────────┐
-│  Step 3: 试验结构         │  → regimens (drug/dose/frequency/route/duration)
-│  + 硬匹配验证             │  → arms (分组 + 样本量)
-│  + 引用对齐检查           │  → comparisons (treatment vs control)
-│  + Review（如有错误）     │  → arm.regimen_id → 已定义 regimen
+│  Step 3: 试验结构          │  → regimens (drug/dose/frequency/route/duration)
+│  + 硬匹配验证              │  → arms (分组 + 样本量)
+│  + 引用对齐检查            │  → comparisons (treatment vs control)
+│  + Review（如有错误）      │  → arm.regimen_id → 已定义 regimen
 └────────┬─────────────────┘
          │  ← 携带 Step 2 上下文
          ▼
 ┌──────────────────────────┐
 │  Step 4: 效应估计         │  → 逐行扫描 Table/Figure
-│  + 严格硬匹配             │  → value / CI / p_value 必须论文原文可追溯
+│  + 严格硬匹配              │  → value / CI / p_value 必须论文原文可追溯
 │  + ID 引用检查            │  → comparison_id / outcome_id / population_id ← 上游定义
-│  + Review（如有错误）     │  → LLM 查找正确值或删除
+│  + Review（如有错误）      │  → LLM 查找正确值或删除
 └────────┬─────────────────┘
          │  ← 携带 Step 2 + Step 3 上下文
          ▼
 ┌──────────────────────────┐
-│  Step 5: 机制证据         │  → target_actions (药物-靶点关系)
-│  + 轻度硬匹配             │  → biomarker_effects (生物标志物变化)
+│  Step 5： 机制证据         │  → target_actions (药物-靶点关系)
+│  + 轻度硬匹配              │  → biomarker_effects (生物标志物变化)
 │  + ID 对齐                │  → claims (核心结论，1-3 条)
 └────────┬─────────────────┘
          │  ← 携带 Step 3 + Step 4 上下文
          ▼
 ┌──────────────────────────┐
-│  Step 6: 合并 + 元数据    │  → 合并 Step 1-5
+│  Step 6:  合并 + 元数据    │  → 合并 Step 1-5
 │                          │  → 计算 confidence (high/moderate/low)
 │                          │  → 写入 metadata
 └────────┬─────────────────┘
@@ -106,26 +105,25 @@ Step 6 → final.json + verification_reports.json
    │
    ▼
 ┌──────────────────┐     匹配成功
-│  硬匹配验证       │ ──────────────→ 直接通过
-│  (无 LLM)        │
+│  硬匹配验证        │ ──────────────→ 直接通过
+│  (无 LLM)         │
 └────────┬─────────┘
          │ 匹配失败
          ▼
 ┌──────────────────┐
-│  生成错误报告     │  → "value=999.99 at field X: NOT FOUND in paper"
+│  生成错误报告      │  → "value=999.99 at field X: NOT FOUND in paper"
 └────────┬─────────┘
          │
          ▼
 ┌──────────────────┐
 │  Review Agent    │  → LLM 查找正确值 / 设为 null
-│  (LLM 调用)      │
+│  (LLM 调用)       │
 └────────┬─────────┘
          │
          ▼
    修正后的 JSON
 ```
 
----
 
 ## 项目结构
 
@@ -152,8 +150,6 @@ Step 6 → final.json + verification_reports.json
 └── .env                     # API 配置
 ```
 
----
-
 ## 环境配置
 
 ```bash
@@ -171,8 +167,6 @@ cp .env.example .env
 #   VISION_MODEL=glm-4.6v
 ```
 
----
-
 ## 运行方式
 
 ### 批量处理
@@ -180,10 +174,10 @@ cp .env.example .env
 支持两种输入目录结构：
 
 1. **平铺模式**：`-i ./pdfs`，目录下直接放 PDF 文件
-2. **子文件夹模式**：`-i /mnt/nature_causal_pdf/S`，目录下按编号分子文件夹
+2. **子文件夹模式**：`-i /mnt/drug_pdf/S`，目录下按编号分子文件夹
 
 ```
-/mnt/nature_causal_pdf/S/
+/mnt/drug_pdf/S/
 ├── 00/
 │   ├── paper1.pdf
 │   ├── paper2.pdf
@@ -217,28 +211,28 @@ output/
 ```bash
 # 处理指定子文件夹
 python batch_run.py \
-  -i /mnt/nature_causal_pdf/S/ \
-  -o output_0319 \
+  -i /mnt/drug_pdf/S/ \
+  -o output_0320 \
   --batches 00 \
   --resume
 
 # 限制每批处理数量
 python batch_run.py \
-  -i /mnt/nature_causal_pdf/S/ \
-  -o output_0319 \
+  -i /mnt/drug_pdf/S/ \
+  -o output_0320 \
   --batch-size 5
 
 # 多线程并发
 python batch_run.py \
-  -i /mnt/nature_causal_pdf/S/ \
-  -o output_0319 \
+  -i /mnt/drug_pdf/S/ \
+  -o output_0320 \
   --batches 00 01 \
   --max-workers 4
 
 # 复用已有 OCR 缓存
 python batch_run.py \
-  -i /mnt/nature_causal_pdf/S/ \
-  -o output_0319 \
+  -i /mnt/drug_pdf/S/ \
+  -o output_0320 \
   --ocr-dir /path/to/existing/cache_ocr \
   --resume
 ```
@@ -260,7 +254,6 @@ python batch_run.py \
 | `--no-validate-pages` | 跳过 OCR 尾页过滤                                |
 | `--resume`            | 跳过已完成的文件（检查 `final.json` 是否存在）             |
 
----
 
 ## 输出说明
 
@@ -412,7 +405,6 @@ python batch_run.py \
 | `"moderate"` | 有错误但 Review 后全部修正 |
 | `"low"`      | Review 后仍有未修正的错误  |
 
----
 
 ## 关键模块详解
 
@@ -468,7 +460,6 @@ LLM，快速且确定性。
 3. GLM-OCR 识别（Markdown 格式输出）
 4. 结果缓存到 `cache_ocr/{pdf_stem}/combined.md`
 
----
 
 ## Schema 说明
 
@@ -488,22 +479,3 @@ LLM，快速且确定性。
 | `effect_estimates`            | 效应估计  | E1/E2/..., value, CI, p_value, direction               |
 | `mechanism_evidence`          | 机制证据  | target_actions, biomarker_effects, claims              |
 | `metadata`                    | 元数据   | extraction_mode, confidence, schema_version            |
-
-### ID 引用关系
-
-```
-P0 (base_population)
- └→ P1, P2 (analysis_populations, derived_from: P0)
-
-R1, R2 (regimens)
- └→ A1.regimen_id = R1, A2.regimen_id = R2 (arms)
-
-A1, A2 (arms)
- └→ C1.treatment.ref_id = A1, C1.control.ref_id = A2 (comparisons)
-
-C1 + O1 + P1
- └→ E1.comparison_id = C1, E1.outcome_id = O1, E1.population_id = P1 (effect_estimates)
-
-E1 (effect_estimates)
- └→ M2.linked_estimate_id = E1 (biomarker_effects, optional)
-```

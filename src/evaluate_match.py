@@ -36,11 +36,6 @@ class MatchResult:
     candidates: List[str] = field(default_factory=list)  # nearby matches if any
 
 
-# ---------------------------------------------------------------------------
-# Anchor number extraction (adapted from causal_agent pipeline.py)
-# ---------------------------------------------------------------------------
-
-
 def extract_anchor_numbers(pdf_text: str) -> Set[str]:
     """
     Extract ALL numbers that appear in the paper text.
@@ -104,11 +99,6 @@ def hard_match_value(val: Any, anchor_set: Set[str], pdf_text: str) -> bool:
             return True
 
     return False
-
-
-# ---------------------------------------------------------------------------
-# HardMatchEvaluator
-# ---------------------------------------------------------------------------
 
 
 class HardMatchEvaluator:
@@ -189,10 +179,6 @@ class HardMatchEvaluator:
 
         return results
 
-    # -------------------------------------------------------------------
-    # Step-specific validators
-    # -------------------------------------------------------------------
-
     def check_pico(self, pico: Dict) -> List[MatchResult]:
         """
         Check PICO block: sample_size, age stats, sex percents, timepoint values.
@@ -256,7 +242,6 @@ class HardMatchEvaluator:
         """
         results = []
 
-        # Numeric checks on regimens
         regimens = structure.get("regimens", [])
         regimen_ids = set()
         for i, reg in enumerate(regimens):
@@ -265,7 +250,6 @@ class HardMatchEvaluator:
                 self._check_numeric_fields(reg, f"trial_structure.regimens[{i}]")
             )
 
-        # Arms
         arms = structure.get("arms", [])
         arm_ids = set()
         for i, arm in enumerate(arms):
@@ -453,10 +437,6 @@ class HardMatchEvaluator:
                 )
 
         return results
-
-    # -------------------------------------------------------------------
-    # Error report generation
-    # -------------------------------------------------------------------
 
     def generate_error_report(self, results: List[MatchResult]) -> str:
         """

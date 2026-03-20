@@ -14,11 +14,14 @@ from src.pipeline import DrugExtractionPipeline
 def is_file_completed(file_path: Path, output_dir: Path) -> bool:
     """
     Check whether a file has already been fully processed.
-    A file is considered complete if its output sub-directory contains final.json.
+    Complete if output dir contains final.json OR final_1.json (multi-study).
     """
     stem = file_path.stem
-    final_file = output_dir / stem / "final.json"
-    return final_file.exists()
+    sub_dir = output_dir / stem
+    if not sub_dir.exists():
+        return False
+    # Single-study: final.json; Multi-study: final_1.json
+    return (sub_dir / "final.json").exists() or (sub_dir / "final_1.json").exists()
 
 
 def process_single_file(
@@ -29,35 +32,43 @@ def process_single_file(
 ) -> dict:
     t0 = time.time()
 
-    # File-level skip: if final.json already exists, skip entirely
+    # File-level skip
     if resume and is_file_completed(file_path, output_dir):
-        final_file = output_dir / file_path.stem / "final.json"
-        with open(final_file, "r", encoding="utf-8") as f:
-            existing = json.load(f)
-        n_effects = len(existing.get("effect_estimates", []))
+        sub_dir = output_dir / file_path.stem
+        # Count effects across all final*.json files
+        n_effects = 0
+        n_studies = 0
+        for fp in sorted(sub_dir.glob("final*.json")):
+            with open(fp, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            n_effects += len(existing.get("effect_estimates", []))
+            n_studies += 1
 
         return {
             "file": file_path.name,
             "status": "skipped",
+            "n_studies": n_studies,
             "n_effects": n_effects,
             "elapsed_sec": 0,
             "error": None,
         }
 
     try:
-        result = pipeline.run(
+        # run() now returns a List[Dict], one per study
+        results = pipeline.run(
             pdf_path=str(file_path),
             output_dir=str(output_dir),
             resume=resume,
         )
-        n_effects = len(result.get("effect_estimates", []))
+        n_studies = len(results)
+        n_effects = sum(len(r.get("effect_estimates", [])) for r in results)
         elapsed = round(time.time() - t0, 1)
 
         return {
             "file": file_path.name,
             "status": "success",
+            "n_studies": n_studies,
             "n_effects": n_effects,
-            "confidence": result.get("metadata", {}).get("confidence", "?"),
             "elapsed_sec": elapsed,
             "error": None,
         }
@@ -67,6 +78,7 @@ def process_single_file(
         return {
             "file": file_path.name,
             "status": "failed",
+            "n_studies": 0,
             "n_effects": 0,
             "elapsed_sec": elapsed,
             "error": str(e),

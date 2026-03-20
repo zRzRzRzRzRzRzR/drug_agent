@@ -4,4 +4,4 @@ zai-sdk>=0.2.2
 pre-commit>=4.5.1
 json5>=0.13.0
 pymupdf>=1.27.1
-glmocr>=0.1.3
+glmocr>=0.1.4
