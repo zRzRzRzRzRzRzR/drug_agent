@@ -1,0 +1,16 @@
+glm-ocr
+reference/case*
+reference/*.json
+.idea
+.vscode
+.DS_Store
+/build
+evidence_card*
+output*
+card
+venv
+.env
+temlplate
+.claude
+__pycache__
+cache*
