@@ -174,7 +174,9 @@ def process_batch(
 def main():
     parser = argparse.ArgumentParser(description="Batch drug evidence extraction")
     parser.add_argument(
-        "-i", "--input-dir", default="./evidence_card",
+        "-i",
+        "--input-dir",
+        default="./evidence_card",
         help="Parent dir containing sub-folders of PDFs, or a flat dir of PDFs",
     )
     parser.add_argument("-o", "--output-dir", default="./output")
@@ -186,15 +188,20 @@ def main():
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--max-workers", type=int, default=1)
     parser.add_argument(
-        "--resume", action="store_true",
+        "--resume",
+        action="store_true",
         help="Skip files whose final.json already exists",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=0,
+        "--batch-size",
+        type=int,
+        default=0,
         help="Max NEW files to process (0 = no limit)",
     )
     parser.add_argument(
-        "--batches", nargs="*", default=None,
+        "--batches",
+        nargs="*",
+        default=None,
         help="Only process these sub-folder names",
     )
 
@@ -212,7 +219,9 @@ def main():
     total_found = sum(len(v) for v in all_batches.values())
     n_skipped_completed = 0
     if args.resume:
-        all_batches, n_skipped_completed = filter_completed_files(all_batches, output_dir)
+        all_batches, n_skipped_completed = filter_completed_files(
+            all_batches, output_dir
+        )
 
     if args.batch_size > 0:
         capped: dict[str, list[Path]] = {}
@@ -243,7 +252,9 @@ def main():
 
     if total_files == 0:
         if n_skipped_completed > 0:
-            print(f"All {n_skipped_completed} files already completed.", file=sys.stderr)
+            print(
+                f"All {n_skipped_completed} files already completed.", file=sys.stderr
+            )
         else:
             print("No input files found.", file=sys.stderr)
         sys.exit(0)

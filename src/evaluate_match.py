@@ -14,7 +14,6 @@ Design principle:
   - Feed errors to review agent for correction or deletion
 """
 
-import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -22,9 +21,9 @@ from typing import Any, Dict, List, Optional, Set
 
 
 class MatchSeverity(str, Enum):
-    ERROR = "error"        # Value not found in paper — must fix or delete
-    WARNING = "warning"    # Value found but ambiguous / multiple candidates
-    INFO = "info"          # Structural check note
+    ERROR = "error"  # Value not found in paper — must fix or delete
+    WARNING = "warning"  # Value found but ambiguous / multiple candidates
+    INFO = "info"  # Structural check note
 
 
 @dataclass
@@ -70,9 +69,7 @@ def extract_anchor_numbers(pdf_text: str) -> Set[str]:
     return anchor_set
 
 
-def hard_match_value(
-    val: Any, anchor_set: Set[str], pdf_text: str
-) -> bool:
+def hard_match_value(val: Any, anchor_set: Set[str], pdf_text: str) -> bool:
     """
     Check if a numeric value can be traced to the paper text.
     """
@@ -204,9 +201,7 @@ class HardMatchEvaluator:
 
         # Numeric fields to check in population
         population = pico.get("population", {})
-        results.extend(
-            self._check_numeric_fields(population, "pico.population")
-        )
+        results.extend(self._check_numeric_fields(population, "pico.population"))
 
         # Outcomes timepoints
         outcomes = pico.get("outcomes", [])
@@ -234,16 +229,18 @@ class HardMatchEvaluator:
             for ap in population.get("analysis_populations", []):
                 ap_n = ap.get("sample_size")
                 if ap_n is not None and ap_n > base_n:
-                    results.append(MatchResult(
-                        field_path=f"pico.population.analysis_populations.{ap.get('population_id', '?')}.sample_size",
-                        value=ap_n,
-                        found=True,
-                        severity=MatchSeverity.ERROR,
-                        message=(
-                            f"Analysis population {ap.get('population_id')} sample_size={ap_n} "
-                            f"> base_population sample_size={base_n}"
-                        ),
-                    ))
+                    results.append(
+                        MatchResult(
+                            field_path=f"pico.population.analysis_populations.{ap.get('population_id', '?')}.sample_size",
+                            value=ap_n,
+                            found=True,
+                            severity=MatchSeverity.ERROR,
+                            message=(
+                                f"Analysis population {ap.get('population_id')} sample_size={ap_n} "
+                                f"> base_population sample_size={base_n}"
+                            ),
+                        )
+                    )
 
         return results
 
@@ -282,13 +279,15 @@ class HardMatchEvaluator:
             # Regimen reference check
             rid = arm.get("regimen_id")
             if rid and rid not in regimen_ids:
-                results.append(MatchResult(
-                    field_path=f"trial_structure.arms[{i}].regimen_id",
-                    value=rid,
-                    found=False,
-                    severity=MatchSeverity.ERROR,
-                    message=f"Arm {arm.get('arm_id')} references regimen_id={rid} which does not exist",
-                ))
+                results.append(
+                    MatchResult(
+                        field_path=f"trial_structure.arms[{i}].regimen_id",
+                        value=rid,
+                        found=False,
+                        severity=MatchSeverity.ERROR,
+                        message=f"Arm {arm.get('arm_id')} references regimen_id={rid} which does not exist",
+                    )
+                )
 
         # Analysis groups
         group_ids = set()
@@ -302,16 +301,18 @@ class HardMatchEvaluator:
                 ref = comp.get(role, {})
                 ref_id = ref.get("ref_id")
                 if ref_id and ref_id not in valid_refs:
-                    results.append(MatchResult(
-                        field_path=f"trial_structure.comparisons[{i}].{role}.ref_id",
-                        value=ref_id,
-                        found=False,
-                        severity=MatchSeverity.ERROR,
-                        message=(
-                            f"Comparison {comp.get('comparison_id')} {role} "
-                            f"references {ref_id} which is not a valid arm or group"
-                        ),
-                    ))
+                    results.append(
+                        MatchResult(
+                            field_path=f"trial_structure.comparisons[{i}].{role}.ref_id",
+                            value=ref_id,
+                            found=False,
+                            severity=MatchSeverity.ERROR,
+                            message=(
+                                f"Comparison {comp.get('comparison_id')} {role} "
+                                f"references {ref_id} which is not a valid arm or group"
+                            ),
+                        )
+                    )
 
         return results
 
@@ -356,33 +357,39 @@ class HardMatchEvaluator:
             # Reference ID checks
             cid = est.get("comparison_id")
             if cid and cid not in valid_comparison_ids:
-                results.append(MatchResult(
-                    field_path=f"{prefix}.comparison_id",
-                    value=cid,
-                    found=False,
-                    severity=MatchSeverity.ERROR,
-                    message=f"Estimate {eid} references comparison_id={cid} not defined in trial_structure",
-                ))
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.comparison_id",
+                        value=cid,
+                        found=False,
+                        severity=MatchSeverity.ERROR,
+                        message=f"Estimate {eid} references comparison_id={cid} not defined in trial_structure",
+                    )
+                )
 
             oid = est.get("outcome_id")
             if oid and oid not in valid_outcome_ids:
-                results.append(MatchResult(
-                    field_path=f"{prefix}.outcome_id",
-                    value=oid,
-                    found=False,
-                    severity=MatchSeverity.ERROR,
-                    message=f"Estimate {eid} references outcome_id={oid} not defined in pico.outcomes",
-                ))
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.outcome_id",
+                        value=oid,
+                        found=False,
+                        severity=MatchSeverity.ERROR,
+                        message=f"Estimate {eid} references outcome_id={oid} not defined in pico.outcomes",
+                    )
+                )
 
             pid = est.get("population_id")
             if pid and pid not in valid_population_ids:
-                results.append(MatchResult(
-                    field_path=f"{prefix}.population_id",
-                    value=pid,
-                    found=False,
-                    severity=MatchSeverity.ERROR,
-                    message=f"Estimate {eid} references population_id={pid} not defined in pico.population",
-                ))
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.population_id",
+                        value=pid,
+                        found=False,
+                        severity=MatchSeverity.ERROR,
+                        message=f"Estimate {eid} references population_id={pid} not defined in pico.population",
+                    )
+                )
 
         return results
 
@@ -423,23 +430,27 @@ class HardMatchEvaluator:
             # Reference checks
             cid = bm.get("comparison_id")
             if cid and cid not in valid_comparison_ids:
-                results.append(MatchResult(
-                    field_path=f"{prefix}.comparison_id",
-                    value=cid,
-                    found=False,
-                    severity=MatchSeverity.ERROR,
-                    message=f"Biomarker effect references comparison_id={cid} not in trial_structure",
-                ))
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.comparison_id",
+                        value=cid,
+                        found=False,
+                        severity=MatchSeverity.ERROR,
+                        message=f"Biomarker effect references comparison_id={cid} not in trial_structure",
+                    )
+                )
 
             lid = bm.get("linked_estimate_id")
             if lid and lid not in valid_estimate_ids:
-                results.append(MatchResult(
-                    field_path=f"{prefix}.linked_estimate_id",
-                    value=lid,
-                    found=False,
-                    severity=MatchSeverity.WARNING,
-                    message=f"Biomarker effect references linked_estimate_id={lid} not in effect_estimates",
-                ))
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.linked_estimate_id",
+                        value=lid,
+                        found=False,
+                        severity=MatchSeverity.WARNING,
+                        message=f"Biomarker effect references linked_estimate_id={lid} not in effect_estimates",
+                    )
+                )
 
         return results
 
@@ -458,7 +469,9 @@ class HardMatchEvaluator:
             return "All values passed hard-match verification."
 
         lines = []
-        lines.append(f"Hard-match verification: {len(errors)} errors, {len(warnings)} warnings\n")
+        lines.append(
+            f"Hard-match verification: {len(errors)} errors, {len(warnings)} warnings\n"
+        )
 
         if errors:
             lines.append("## ERRORS (must fix or delete)\n")
@@ -479,7 +492,9 @@ class HardMatchEvaluator:
         return {
             "total_checks": len(results),
             "errors": len([r for r in results if r.severity == MatchSeverity.ERROR]),
-            "warnings": len([r for r in results if r.severity == MatchSeverity.WARNING]),
+            "warnings": len(
+                [r for r in results if r.severity == MatchSeverity.WARNING]
+            ),
             "details": [
                 {
                     "field_path": r.field_path,

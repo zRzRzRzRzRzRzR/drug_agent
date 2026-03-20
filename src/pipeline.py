@@ -29,9 +29,9 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .evaluate_match import HardMatchEvaluator, MatchResult, MatchSeverity
+from .evaluate_match import HardMatchEvaluator
 from .llm_client import GLMClient
 from .review import review_effects_with_context, review_with_hard_match
 
@@ -86,9 +86,7 @@ def _extract_empty_block(schema: Dict, *keys: str) -> Dict:
 # ---------------------------------------------------------------------------
 
 
-def step1_linkage_design(
-    client: GLMClient, pdf_text: str, schema: Dict
-) -> Dict:
+def step1_linkage_design(client: GLMClient, pdf_text: str, schema: Dict) -> Dict:
     """Extract trial_linkage and design from the paper."""
     prompt_template = _load_prompt("step1_linkage_design")
 
@@ -307,9 +305,7 @@ def step4_effects(
         effects = []
 
     # --- Collect valid upstream IDs ---
-    valid_comp_ids = {
-        c.get("comparison_id") for c in structure.get("comparisons", [])
-    }
+    valid_comp_ids = {c.get("comparison_id") for c in structure.get("comparisons", [])}
     valid_outcome_ids = {o.get("outcome_id") for o in pico.get("outcomes", [])}
     valid_pop_ids = {
         pico.get("population", {}).get("base_population", {}).get("population_id", "P0")
@@ -374,9 +370,7 @@ def step5_mechanism(
     skeleton = _extract_empty_block(schema, "mechanism_evidence")
 
     # Build context: valid comparison IDs and estimate IDs
-    valid_comp_ids = {
-        c.get("comparison_id") for c in structure.get("comparisons", [])
-    }
+    valid_comp_ids = {c.get("comparison_id") for c in structure.get("comparisons", [])}
     valid_estimate_ids = {e.get("estimate_id") for e in effects}
 
     full_prompt = prompt_template.replace(
@@ -561,9 +555,7 @@ class DrugExtractionPipeline:
         # -- Step 2: PICO --
         pico, pico_report = self._run_step_with_report(
             step_name="step2_pico",
-            step_func=lambda: step2_pico(
-                self.client, pdf_text, self.schema, evaluator
-            ),
+            step_func=lambda: step2_pico(self.client, pdf_text, self.schema, evaluator),
             pdf_dir=pdf_dir,
             resume=resume,
         )

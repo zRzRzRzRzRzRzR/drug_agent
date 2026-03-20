@@ -13,8 +13,8 @@
 
 ## 2. design
 
-该字段用于描述临床试验的**研究设计特征（Study Design Characteristics）**。  
-这些信息用于刻画研究的基本方法学结构，例如是否随机分配、盲法类型、试验分组结构以及是否为多中心研究。  
+该字段用于描述临床试验的**研究设计特征（Study Design Characteristics）**。
+这些信息用于刻画研究的基本方法学结构，例如是否随机分配、盲法类型、试验分组结构以及是否为多中心研究。
 所有字段均采用**单选枚举（single-choice）**形式，禁止自由文本填写。
 
 ### 标注原则
@@ -948,7 +948,7 @@
 
 - meta-analysis
 - causal inference
-- evidence grading  
+- evidence grading
   的核心数据来源。
 
 ---
@@ -1262,7 +1262,7 @@ metadata 不描述研究内容本身，而是描述：
 
 - 数据追溯（traceability）
 - 质量评估（quality assessment）
-- pipeline 管理  
+- pipeline 管理
   具有重要意义。
 
 ---

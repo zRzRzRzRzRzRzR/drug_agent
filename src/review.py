@@ -14,10 +14,9 @@ Design:
 
 import json
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from .llm_client import GLMClient
-
 
 _REVIEW_SYSTEM_PROMPT = """你是一名临床试验数据审核专家。你会收到：
 
@@ -119,14 +118,20 @@ def review_effects_with_context(
     Handles both numeric hard-match errors and ID reference errors.
     """
     if "All values passed" in error_report:
-        print("  [Review] effect_estimates: no errors, skipping review", file=sys.stderr)
+        print(
+            "  [Review] effect_estimates: no errors, skipping review", file=sys.stderr
+        )
         return effects
 
     # Build context from upstream
     context_parts = []
     if pico:
         # Extract valid IDs for reference
-        pop_ids = [pico.get("population", {}).get("base_population", {}).get("population_id", "P0")]
+        pop_ids = [
+            pico.get("population", {})
+            .get("base_population", {})
+            .get("population_id", "P0")
+        ]
         for ap in pico.get("population", {}).get("analysis_populations", []):
             pop_ids.append(ap.get("population_id", ""))
         outcome_ids = [o.get("outcome_id", "") for o in pico.get("outcomes", [])]
@@ -134,7 +139,9 @@ def review_effects_with_context(
         context_parts.append(f"Valid outcome_ids: {outcome_ids}")
 
     if structure:
-        comp_ids = [c.get("comparison_id", "") for c in structure.get("comparisons", [])]
+        comp_ids = [
+            c.get("comparison_id", "") for c in structure.get("comparisons", [])
+        ]
         context_parts.append(f"Valid comparison_ids: {comp_ids}")
 
     context_str = "\n".join(context_parts) if context_parts else "(no upstream context)"
