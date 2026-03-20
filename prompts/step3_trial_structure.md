@@ -50,16 +50,53 @@
 
 - **comparison_id**: C1, C2, ...
 - **treatment**: `{"ref_type": "arm", "ref_id": "A1"}`（引用 arm 或 group）
-- **control**: `{"ref_type": "arm", "ref_id": "A2"}`
+- **control**: `{"ref_type": "arm", "ref_id": "A2"}`（引用 arm 或 group）
 - **population_id**: 对应分析人群（如 P1）
 - **analysis_set**: intent-to-treat / per-protocol / etc.
 - **timepoint**: 时间点
 - **model_spec**: 统计模型说明
 
+---
+
 ## ⚠️ 硬匹配规则
 
 > 所有数值字段（dose value、duration value、arm sample_size）必须能在论文原文中找到。
 > **不要推断或计算**。如果论文说 "10 mg or 25 mg" 就写两个 regimen，不要合并。
+
+---
+
+## 📋 多剂量探索试验的特殊处理
+
+> **适用于**：Phase 1 dose-finding / dose-escalation、含多个剂量 cohort 的试验。
+
+### Regimen 粒度
+- **每个不同的剂量/频率方案 = 一个独立的 regimen**
+  - 例如：inclisiran 25mg single dose = R1, 100mg single dose = R2, 300mg monthly×2 = R3, ...
+  - placebo 也应按 phase 分开：single-dose phase placebo = 一个 regimen，multiple-dose phase placebo = 另一个 regimen
+- 如果同一剂量有 with statin 和 without statin 两个 cohort，视为**同一 regimen 不同 arm**（statin 是背景治疗，不是 regimen 组成部分），或视为两个不同的 arm with regimen_notes 区分
+
+### Arm 粒度
+- **每个剂量 cohort = 一个独立的 arm**
+  - 论文 Table 1/2/3 中的每个列（N=3, N=6 等）对应一个 arm
+
+### Placebo pooling
+- 如果论文明确说 "data from participants in the placebo group were combined across cohorts for analysis"：
+  - 仍然为每个 phase 的 placebo 建一个 arm（如 A_placebo_single, A_placebo_multi）
+  - 使用 `analysis_groups` 建一个 pooled placebo group（如 G1），并标注 member_arm_ids 和 pooling_method
+  - comparison 的 control 可以引用该 group：`{"ref_type": "group", "ref_id": "G1"}`
+- 如果论文没有 pooling：每个 placebo arm 直接作为 comparison 的 control
+
+### Comparison 粒度（关键）
+- **每个剂量 cohort vs 对应 placebo = 一个独立的 comparison**
+  - 例如：C1 = 25mg vs placebo, C2 = 100mg vs placebo, C3 = 300mg vs placebo, ...
+  - 对于 multiple-dose phase（with/without statin 的 cohort），每个 cohort vs pooled placebo 各一个 comparison
+- **不要把多个剂量合并成一个 comparison**。论文 Table 2/3 中的每一列对应一个 comparison。
+
+### population_id 对齐
+- single-dose phase 的 comparison → 引用 Step 2 中 single-dose phase 的 population_id
+- multiple-dose phase 的 comparison → 引用 Step 2 中 multiple-dose phase 的 population_id
+
+---
 
 ## 一致性检查
 
