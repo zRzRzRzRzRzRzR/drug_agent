@@ -27,7 +27,7 @@
   //   TA1, TA2... = Target action 字段路径：mechanism_evidence.target_actions[].action_id
   //   B1, B2... = Biomarker effect 字段路径：mechanism_evidence.biomarker_effects[].biomarker_id
   //   MC1, MC2... = mechanism claims 字段路径： mechanism_evidence.claims[].claim_id
-  // 
+  //
   //【全局 步骤约定】：
   // step0_split
   // step1_linkage_design
@@ -135,7 +135,7 @@
       //【含义】：盲法类型（Blinding / Masking）→ 是否对受试者 / 研究者 / 评估者进行信息遮蔽
       //【可选值】："open-label" | "single-blind" | "double-blind" | "triple-blind" | "unclear"
 
-      // "open-label" 
+      // "open-label"
       //【判定】：明确说明研究未采用盲法，或参与方知晓分组
       //【例子】：
       // - "open-label"
@@ -144,9 +144,9 @@
       // - "non-blinded study"
       //【规则】：
       // - 仅在文中明确说明未盲法、开放标签、或所有关键角色知晓分组时使用。 → 判为 open-label
-      // - 即使部分盲（例如 only assessor blinded）但明确写“open-label” → 仍优先标记为 open-label（优先遵循原文标签） 
+      // - 即使部分盲（例如 only assessor blinded）但明确写“open-label” → 仍优先标记为 open-label（优先遵循原文标签）
 
-      // "single-blind" 
+      // "single-blind"
       //【判定】：仅一个角色被遮蔽（通常为受试者 或 评估者）
       // 明确只有一类角色被遮蔽时使用，例如 participant-blinded 或 assessor-blinded。
       //【例子】：
@@ -644,7 +644,7 @@
         //【注意】：- 不允许根据“重要性”或“是否写在摘要中”主观判断 primary
         // - 若文中仅列出多个 outcomes 但未分 primary/secondary → 全部标记 "unclear"
         // - safety outcome（如 AE）即使是 secondary endpoint，也优先标记为 "safety"
-        // - 不允许一个 outcome 同时属于多个 role（必须单选）        
+        // - 不允许一个 outcome 同时属于多个 role（必须单选）
         "role": "unclear",
 
         // 观察时间点。
@@ -765,7 +765,7 @@
             },
 
             // 给药频率。
-            // code：标准化频率编码 
+            // code：标准化频率编码
             // label 可保留原文表述。
             //【code 可选值】："QD" | "BID" | "TID" | "QID" | "PRN"
             //【判定规则】：
@@ -781,7 +781,7 @@
             // 不得为了填写 code 而进行近似或错误映射（如 weekly → QD 是错误的）
             // label 应尽量保留原文完整表达（如 "once weekly", "every 2 weeks"）
             // code 与 label 语义必须一致，禁止出现冲突
-            // 若文中未报告频率，则 code = null 且 label = null            
+            // 若文中未报告频率，则 code = null 且 label = null
             "frequency": {
               "code": null,
               "label": null
@@ -1037,7 +1037,7 @@
       // 不得将 "NS"、"significant"、"p<0.05" 直接写成字符串
       // p_value 字段只保留数值，不保留比较符号
       // 若团队后续需要保留比较符号，应新增独立字段（如 p_value_relation），不要混写在 p_value 中
-      // 不得根据 confidence interval 是否跨 1 / 0 反推 p 值      
+      // 不得根据 confidence interval 是否跨 1 / 0 反推 p 值
       "p_value": null,
 
       // 方向。
@@ -1282,5 +1282,3 @@
     "timestamp": null
   }
 }
-
-
