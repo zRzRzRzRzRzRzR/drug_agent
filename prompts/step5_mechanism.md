@@ -2,6 +2,12 @@
 
 你是一名医学信息学研究员。请仔细阅读论文全文，提取药物作用机制、生物标志物效应和核心结论。
 
+## 字段级标注规范
+
+以下是该步骤涉及字段的详细标注规范（来自 schema_annotation.json）：
+
+{annotation_guidance}
+
 ## 上游已提取的数据
 
 ### 试验结构（Step 3）
@@ -22,12 +28,16 @@
 
 提取论文中提到的药物-靶点关系：
 
-- **evidence_id**: M1, M2, ...
+- **action_id**: **必须使用 TA1, TA2, ... 前缀**（不要用 M1, M2）
 - **drug_name**: 药物名称
-- **relation**: inhibits / activates / modulates / binds / unclear
-- **target.symbol**: 靶点符号（蛋白/基因名）
-- **support.source**: 证据来源（如 "cited from [ref]", "this study"）
-- **support.confidence**: high / moderate / low
+- **target**: 靶点符号（蛋白/基因名）
+- **action_type**: **必须从以下枚举中选择**：
+  - `"inhibitor"` — 不要写 "inhibits"
+  - `"agonist"` — 不要写 "activates"
+  - `"antagonist"` — 不要写 "blocks"
+  - `"modulator"` — 不要写 "modulates"
+  - `"unclear"`
+- **evidence_source**: 证据来源（如 "abstract", "introduction", "discussion"）
 
 仅提取论文中**明确提到**的靶点关系。如果论文是纯临床试验未讨论机制，此数组可以为空 `[]`。
 
@@ -35,26 +45,34 @@
 
 提取干预对生物标志物的影响：
 
-- **evidence_id**: M2, M3, ...（接续 target_actions 编号）
-- **linked_estimate_id**: 如果该 biomarker 变化与 Step 4 中的某条 effect_estimate 直接对应，填写该 estimate_id；否则填 `null`
-- **comparison_id**: 引用 Step 3 中的 comparison_id（如果可以对应的话）
-- **biomarker.name**: 生物标志物名称
-- **biomarker.unit**: 单位
-- **timepoint**: 评估时间点
-- **estimate_type**: mean_difference / percent_change / fold_change / etc.
-- **value**: 效应值（必须来自论文原文）
-- **ci**: 置信区间（如有）
-- **p_value**: p 值（如有）
-- **direction**: increase / decrease / no_change / unclear
+- **biomarker_id**: **必须使用 B1, B2, ... 前缀**（不要用 M2, M3）
+- **name**: 生物标志物名称
+- **effect**: increase / decrease / no_change / unclear
+- **notes**: 补充说明
+
+**⚠️ 收录范围规则**：
+- 仅收录论文中明确出现的 biomarker 变化
+- 不收录纯背景知识或教科书式药理介绍
+- 若某指标已在 outcomes 或 effect_estimates 中完整表达，mechanism_evidence 仅保留解释性或总结性部分
 
 ### 5.3 claims（核心结论，必填）
 
 提取论文的**核心结论**（通常 1-3 条）：
 
-- **claim_id**: MC1, MC2, ...
+- **claim_id**: **必须使用 MC1, MC2, ... 前缀**
 - **text**: 结论性描述（贴近原文语义，可轻度标准化）
-- **scope**: clinical efficacy / safety / mechanism / biomarker / pharmacokinetics / unclear
+- **scope**: **必须为以下单一值之一**（不可写多个用逗号分隔）：
+  - `"clinical efficacy"` / `"safety"` / `"mechanism"` / `"biomarker"` / `"pharmacokinetics"` / `"unclear"`
+  - 如果一条结论同时涉及疗效和安全性，**拆分为两条 claim**
 - **confidence**: high / moderate / low / unclear
+  - high: 主要结果直接支持的 claim（如主要终点达到显著性差异）
+  - moderate: 次要分析或探索性分析支持
+  - low: 讨论推测、机制假说、小样本发现
+  - **含 may, might, suggests 等推测性语言的 claim → 不应标记为 high**
+
+**⚠️ 单臂试验的 claims**：
+- 单臂试验没有 effect_estimates 时，claims 部分尤其重要
+- 应提取论文的核心结论，包括：response rate、survival、safety profile 等描述性结论
 
 优先提取来源：
 - Abstract 结论部分
@@ -63,14 +81,18 @@
 
 ## ⚠️ 硬匹配规则
 
-> biomarker_effects 中的 value、ci、p_value 必须能在论文原文中找到。
-> 不要推断或计算。如果只有描述性结论（如 "drug reduced CRP"），不需要填数值字段。
+> biomarker_effects 中的数值字段必须能在论文原文中找到。
+> 不要推断或计算。
 
-## linked_estimate_id 填写规则
+## ⚠️ ID 格式规则（严格）
 
-- 如果 biomarker_effect 本质上就是 Step 4 中某条 estimate 的生物标志物版本 → 填写对应 estimate_id
-- 如果只是 Discussion 中的机制描述，无法明确对应某条 estimate → 填 `null`
-- **不要强行关联**
+| 实体 | ID 前缀 | 示例 |
+|------|---------|------|
+| target_actions | TA | TA1, TA2 |
+| biomarker_effects | B | B1, B2 |
+| claims | MC | MC1, MC2 |
+
+**绝对不要使用 M1, M2 作为 target_actions 的 ID。**
 
 ## 输出格式
 

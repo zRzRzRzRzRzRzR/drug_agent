@@ -1,11 +1,5 @@
-"""
-pipeline.py — Drug-Database Evidence Extraction Pipeline.
-
-Step 0: Multi-study split detection
-Step 1-6: Per-study extraction with hard-match verification
-"""
-
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -21,7 +15,7 @@ _PROJECT_DIR = _SRC_DIR.parent
 _PROMPTS_DIR = _PROJECT_DIR / "prompts"
 _TEMPLATE_DIR = _PROJECT_DIR / "template"
 _SCHEMA_PATH = _TEMPLATE_DIR / "schema.json"
-_ANNOTATION_PATH = _TEMPLATE_DIR / "schema_annotation.md"
+_ANNOTATION_PATH = _TEMPLATE_DIR / "schema_annotation.json"
 
 
 def save_json(path: Path, data: Any) -> None:
@@ -45,6 +39,46 @@ def _load_prompt(name: str) -> str:
 def _load_schema() -> Dict:
     with open(_SCHEMA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_annotation() -> str:
+    """Load schema_annotation.json as raw text for prompt injection."""
+    raw = _ANNOTATION_PATH.read_bytes()
+    for enc in ("utf-8", "utf-8-sig", "latin1"):
+        try:
+            return raw.decode(enc, errors="strict")
+        except (UnicodeDecodeError, ValueError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _extract_annotation_section(annotation_text: str, step_marker: str) -> str:
+    """
+    Extract a section from schema_annotation.json between step markers.
+    step_marker: e.g. "step 1", "step 2", etc.
+    Returns the section text including field-level annotation comments.
+    """
+    # The annotation file uses markers like "// step 1", "// step 2", etc.
+    # We extract between consecutive step markers
+    step_map = {
+        "step 1": (r"// \*+\s*\n\s*// step 1", r"// \*+\s*\n\s*// step 2"),
+        "step 2": (r"// \*+\s*\n\s*// step 2", r"// \*+\s*\n\s*// step 3"),
+        "step 3": (r"// \*+\s*\n\s*// step 3", r"// \*+\s*\n\s*// step 4"),
+        "step 4": (r"// \*+\s*\n\s*// step 4", r"// \*+\s*\n\s*// step 5"),
+        "step 5": (r"// \*+\s*\n\s*// step 5", r"// =+\s*\n\s*// 7\. metadata"),
+    }
+    if step_marker not in step_map:
+        return ""
+
+    start_pat, end_pat = step_map[step_marker]
+    start_match = re.search(start_pat, annotation_text, re.IGNORECASE)
+    end_match = re.search(end_pat, annotation_text, re.IGNORECASE)
+
+    if start_match and end_match:
+        return annotation_text[start_match.start() : end_match.start()]
+    elif start_match:
+        return annotation_text[start_match.start() :]
+    return ""
 
 
 def _extract_empty_block(schema: Dict, *keys: str) -> Any:
@@ -114,6 +148,7 @@ def step1_linkage_design(
     client: GLMClient,
     pdf_text: str,
     schema: Dict,
+    annotation_text: str,
     study_context: str = "",
 ) -> Dict:
     prompt_template = _load_prompt("step1_linkage_design")
@@ -121,9 +156,15 @@ def step1_linkage_design(
         "trial_linkage": _extract_empty_block(schema, "trial_linkage"),
         "design": _extract_empty_block(schema, "design"),
     }
+
+    # Inject annotation guidance
+    annotation_section = _extract_annotation_section(annotation_text, "step 1")
+
     full_prompt = prompt_template.replace(
         "{schema_skeleton}", json.dumps(skeleton, indent=2, ensure_ascii=False)
     )
+    if annotation_section:
+        full_prompt = full_prompt.replace("{annotation_guidance}", annotation_section)
     full_prompt = _inject_study_context(full_prompt, study_context)
     full_prompt = full_prompt.replace("{paper_text}", pdf_text)
 
@@ -150,13 +191,18 @@ def step2_pico(
     pdf_text: str,
     schema: Dict,
     evaluator: HardMatchEvaluator,
+    annotation_text: str,
     study_context: str = "",
 ) -> Tuple[Dict, Dict]:
     prompt_template = _load_prompt("step2_pico")
     skeleton = _extract_empty_block(schema, "pico")
+    annotation_section = _extract_annotation_section(annotation_text, "step 2")
+
     full_prompt = prompt_template.replace(
         "{schema_skeleton}", json.dumps(skeleton, indent=2, ensure_ascii=False)
     )
+    if annotation_section:
+        full_prompt = full_prompt.replace("{annotation_guidance}", annotation_section)
     full_prompt = _inject_study_context(full_prompt, study_context)
     full_prompt = full_prompt.replace("{paper_text}", pdf_text)
 
@@ -206,16 +252,21 @@ def step3_trial_structure(
     schema: Dict,
     pico: Dict,
     evaluator: HardMatchEvaluator,
+    annotation_text: str,
     study_context: str = "",
 ) -> Tuple[Dict, Dict]:
     prompt_template = _load_prompt("step3_trial_structure")
     skeleton = _extract_empty_block(schema, "trial_structure")
+    annotation_section = _extract_annotation_section(annotation_text, "step 3")
+
     full_prompt = prompt_template.replace(
         "{schema_skeleton}", json.dumps(skeleton, indent=2, ensure_ascii=False)
     )
     full_prompt = full_prompt.replace(
         "{pico_context}", json.dumps(pico, indent=2, ensure_ascii=False)
     )
+    if annotation_section:
+        full_prompt = full_prompt.replace("{annotation_guidance}", annotation_section)
     full_prompt = _inject_study_context(full_prompt, study_context)
     full_prompt = full_prompt.replace("{paper_text}", pdf_text)
 
@@ -251,6 +302,99 @@ def step3_trial_structure(
 
 
 # ---------------------------------------------------------------------------
+# Step 3.5: Cross-layer Mapping / Reconciliation
+# ---------------------------------------------------------------------------
+
+
+_STEP35_SYSTEM_PROMPT = """
+你是一名临床试验数据审核专家。你的任务是在 PICO 语义层与 trial_structure 结构层之间建立显式映射关系。
+"""
+
+
+def step3_5_cross_mapping(
+    client: GLMClient,
+    pico: Dict,
+    structure: Dict,
+) -> Dict:
+    """
+    Step 3.5: Cross-layer Mapping / Reconciliation.
+
+    Purpose:
+      - Back-fill pico.interventions[].mapped_regimen_ids
+      - Back-fill pico.comparators[].mapped_regimen_ids
+      - Validate consistency between intervention drug_list and regimen components
+
+    Returns:
+      Updated pico dict with mapped_regimen_ids filled.
+    """
+    prompt = f"""## 任务：跨层映射（Cross-layer Mapping）
+
+请根据以下 PICO 和 trial_structure 数据，完成映射。
+
+### PICO（Step 2 输出）
+
+```json
+{json.dumps(pico, ensure_ascii=False, indent=2)}
+```
+
+### trial_structure（Step 3 输出）
+
+```json
+{json.dumps(structure, ensure_ascii=False, indent=2)}
+```
+
+### 映射规则
+
+1. **interventions[].mapped_regimen_ids**:
+   - 对于每个 intervention，找到 trial_structure.regimens 中对应的 regimen_id
+   - 匹配依据：intervention.drug_list 中的药物名应出现在 regimen.components[].drug_name 中
+   - 一个 intervention 可以映射到多个 regimen（如多剂量方案）
+   - 仅映射 experimental/treatment 相关的 regimen
+   - 若无法可靠对应，保留 []
+
+2. **comparators[].mapped_regimen_ids**:
+   - 对于每个 comparator，找到对应的 placebo/control regimen
+   - 匹配依据：comparator.type（如 "placebo"）与 regimen.label / components
+   - 若 comparators = []（单臂试验），跳过
+
+3. **一致性校验**:
+   - 若 design.allocation = "single-arm"，则 comparators 必须为 []
+   - intervention.drug_list 中的每个药物必须在映射的 regimen.components 中出现
+
+### 输出格式
+
+输出完整更新后的 PICO JSON（与输入结构完全一致），只修改 mapped_regimen_ids 字段。
+只输出 JSON，不要其他内容。"""
+
+    updated_pico = client.call_json(prompt, system_prompt=_STEP35_SYSTEM_PROMPT)
+
+    if isinstance(updated_pico, dict):
+        # Validate that the structure is preserved
+        if "population" in updated_pico and "outcomes" in updated_pico:
+            print("[Step 3.5] Cross-mapping applied", file=sys.stderr)
+
+            # Log the mappings
+            for iv in updated_pico.get("interventions", []):
+                mid = iv.get("mapped_regimen_ids", [])
+                print(
+                    f"  Intervention {iv.get('intervention_id')}: mapped to {mid}",
+                    file=sys.stderr,
+                )
+            for comp in updated_pico.get("comparators", []):
+                mid = comp.get("mapped_regimen_ids", [])
+                print(
+                    f"  Comparator {comp.get('comparator_id')}: mapped to {mid}",
+                    file=sys.stderr,
+                )
+            return updated_pico
+
+    print(
+        "[Step 3.5] LLM returned unexpected output, keeping original", file=sys.stderr
+    )
+    return pico
+
+
+# ---------------------------------------------------------------------------
 # Step 4
 # ---------------------------------------------------------------------------
 
@@ -262,10 +406,13 @@ def step4_effects(
     pico: Dict,
     structure: Dict,
     evaluator: HardMatchEvaluator,
+    annotation_text: str,
     study_context: str = "",
 ) -> Tuple[List[Dict], Dict]:
     prompt_template = _load_prompt("step4_effects")
     skeleton_item = schema["effect_estimates"][0]
+    annotation_section = _extract_annotation_section(annotation_text, "step 4")
+
     full_prompt = prompt_template.replace(
         "{estimate_skeleton}", json.dumps(skeleton_item, indent=2, ensure_ascii=False)
     )
@@ -275,6 +422,8 @@ def step4_effects(
     full_prompt = full_prompt.replace(
         "{structure_context}", json.dumps(structure, indent=2, ensure_ascii=False)
     )
+    if annotation_section:
+        full_prompt = full_prompt.replace("{annotation_guidance}", annotation_section)
     full_prompt = _inject_study_context(full_prompt, study_context)
     full_prompt = full_prompt.replace("{paper_text}", pdf_text)
 
@@ -333,10 +482,13 @@ def step5_mechanism(
     structure: Dict,
     effects: List[Dict],
     evaluator: HardMatchEvaluator,
+    annotation_text: str,
     study_context: str = "",
 ) -> Tuple[Dict, Dict]:
     prompt_template = _load_prompt("step5_mechanism")
     skeleton = _extract_empty_block(schema, "mechanism_evidence")
+    annotation_section = _extract_annotation_section(annotation_text, "step 5")
+
     valid_comp_ids = {c.get("comparison_id") for c in structure.get("comparisons", [])}
     valid_estimate_ids = {e.get("estimate_id") for e in effects}
 
@@ -349,6 +501,8 @@ def step5_mechanism(
     full_prompt = full_prompt.replace(
         "{effects_context}", json.dumps(effects, indent=2, ensure_ascii=False)
     )
+    if annotation_section:
+        full_prompt = full_prompt.replace("{annotation_guidance}", annotation_section)
     full_prompt = _inject_study_context(full_prompt, study_context)
     full_prompt = full_prompt.replace("{paper_text}", pdf_text)
 
@@ -403,8 +557,8 @@ def step6_merge(
         "metadata": {
             "extraction_mode": "automated",
             "confidence": None,
-            "schema_version": "v1_patch_1",
-            "annotator_id": "drug_agent_v1",
+            "schema_version": "v2",
+            "annotator_id": "drug_agent_v2",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     }
@@ -448,8 +602,10 @@ class DrugExtractionPipeline:
         self.client = client
         self.ocr_text_func = ocr_text_func
         self.schema = _load_schema()
+        self.annotation_text = _load_annotation()
         self.max_retries = max_retries
         print(f"[Pipeline] Schema: {_SCHEMA_PATH}", file=sys.stderr)
+        print(f"[Pipeline] Annotation: {_ANNOTATION_PATH}", file=sys.stderr)
 
         if ocr_init_func is not None:
             ocr_init_func(
@@ -521,6 +677,7 @@ class DrugExtractionPipeline:
                 pdf_text=pdf_text,
                 evaluator=evaluator,
                 schema=self.schema,
+                annotation_text=self.annotation_text,
                 study_info=study_info,
                 study_context=study_context,
                 suffix=suffix,
@@ -544,6 +701,7 @@ class DrugExtractionPipeline:
         pdf_text: str,
         evaluator: HardMatchEvaluator,
         schema: Dict,
+        annotation_text: str,
         study_info: Optional[Dict],
         study_context: str,
         suffix: str,
@@ -555,7 +713,7 @@ class DrugExtractionPipeline:
         linkage_design = self._run_step(
             step_name=f"step1_linkage_design{suffix}",
             step_func=lambda: step1_linkage_design(
-                self.client, pdf_text, schema, study_context
+                self.client, pdf_text, schema, annotation_text, study_context
             ),
             pdf_dir=pdf_dir,
             resume=resume,
@@ -564,7 +722,7 @@ class DrugExtractionPipeline:
         pico, pico_report = self._run_step_with_report(
             step_name=f"step2_pico{suffix}",
             step_func=lambda: step2_pico(
-                self.client, pdf_text, schema, evaluator, study_context
+                self.client, pdf_text, schema, evaluator, annotation_text, study_context
             ),
             pdf_dir=pdf_dir,
             resume=resume,
@@ -575,7 +733,13 @@ class DrugExtractionPipeline:
         structure, struct_report = self._run_step_with_report(
             step_name=f"step3_trial_structure{suffix}",
             step_func=lambda: step3_trial_structure(
-                self.client, pdf_text, schema, pico, evaluator, study_context
+                self.client,
+                pdf_text,
+                schema,
+                pico,
+                evaluator,
+                annotation_text,
+                study_context,
             ),
             pdf_dir=pdf_dir,
             resume=resume,
@@ -583,10 +747,25 @@ class DrugExtractionPipeline:
         if struct_report:
             all_reports.append(struct_report)
 
+        # Step 3.5: Cross-layer mapping
+        pico = self._run_step(
+            step_name=f"step3_5_cross_mapping{suffix}",
+            step_func=lambda: step3_5_cross_mapping(self.client, pico, structure),
+            pdf_dir=pdf_dir,
+            resume=resume,
+        )
+
         effects, effects_report = self._run_step_with_report(
             step_name=f"step4_effects{suffix}",
             step_func=lambda: step4_effects(
-                self.client, pdf_text, schema, pico, structure, evaluator, study_context
+                self.client,
+                pdf_text,
+                schema,
+                pico,
+                structure,
+                evaluator,
+                annotation_text,
+                study_context,
             ),
             pdf_dir=pdf_dir,
             resume=resume,
@@ -603,6 +782,7 @@ class DrugExtractionPipeline:
                 structure,
                 effects,
                 evaluator,
+                annotation_text,
                 study_context,
             ),
             pdf_dir=pdf_dir,

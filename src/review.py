@@ -1,17 +1,3 @@
-"""
-review.py — Review agent for drug extraction pipeline.
-
-Takes hard-match error reports and asks the LLM to:
-  1. Find the correct value in the paper text, OR
-  2. Delete the value (set to null) if it cannot be found
-
-Design:
-  - Input: extracted JSON block + error report + paper text
-  - Output: corrected JSON block
-  - The LLM is told exactly which fields failed and why
-  - No guessing — either find it in the paper or delete it
-"""
-
 import json
 import sys
 from typing import Dict, List, Optional

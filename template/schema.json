@@ -5,68 +5,99 @@
     "doi": null,
     "pmcid": null
   },
-
   "design": {
     "reported": {
-      "randomized": null,
-      "blinding": null,
-      "allocation": null,
-      "multicenter": null
+      "randomized": "unclear",
+      "blinding": "unclear",
+      "allocation": "unclear",
+      "multicenter": "unclear"
     }
   },
-
   "pico": {
     "population": {
       "base_population": {
         "population_id": "P0",
         "description": null,
         "sample_size": null,
-        "region": { "country_list": [], "region": null },
-        "age": { "mean": null, "sd": null, "median": null, "iqr": null, "range_min": null, "range_max": null },
-        "sex": { "female_percent": null, "male_percent": null, "other_percent": null }
+        "region": {
+          "country_list": [],
+          "region": null
+        },
+        "age": {
+          "mean": null,
+          "sd": null,
+          "median": null,
+          "iqr": null,
+          "range_min": null,
+          "range_max": null
+        },
+        "sex": {
+          "female_percent": null,
+          "male_percent": null,
+          "other_percent": null
+        }
       },
       "analysis_populations": [
         {
           "population_id": "P1",
           "derived_from": "P0",
-          "role": "primary",
+          "role": null,
           "analysis_set": null,
           "sample_size": null,
-          "region": { "country_list": [], "region": null },
-          "age": { "mean": null, "sd": null, "median": null, "iqr": null, "range_min": null, "range_max": null },
-          "sex": { "female_percent": null, "male_percent": null, "other_percent": null }
+          "region": {
+            "country_list": [],
+            "region": null
+          },
+          "age": {
+            "mean": null,
+            "sd": null,
+            "median": null,
+            "iqr": null,
+            "range_min": null,
+            "range_max": null
+          },
+          "sex": {
+            "female_percent": null,
+            "male_percent": null,
+            "other_percent": null
+          }
         }
       ]
     },
-
-    "intervention": {
-      "intervention_id": "I1",
-      "label": null,
-      "drug_list": [],
-      "mapped_regimen_ids": [],
-      "notes": "Concept-level intervention; regimen carries dose/frequency/route/duration. mapped_regimen_ids can be multiple."
-    },
-
-    "comparator": {
-      "comparator_id": "K1",
-      "label": null,
-      "type": null,
-      "mapped_regimen_ids": [],
-      "notes": "Concept-level comparator; regimen carries details. mapped_regimen_ids can be multiple."
-    },
-
+    "interventions": [
+      {
+        "intervention_id": "I1",
+        "label": null,
+        "type": "unclear",
+        "drug_list": [],
+        "mapped_regimen_ids": [],
+        "notes": null
+      }
+    ],
+    "comparators": [
+      {
+        "comparator_id": "K1",
+        "label": null,
+        "type": "unclear",
+        "mapped_regimen_ids": [],
+        "notes": null
+      }
+    ],
     "outcomes": [
       {
         "outcome_id": "O1",
         "label": null,
-        "role": null,
-        "timepoint": { "label": null, "value": null, "unit": null },
-        "polarity": null,
-        "outcome_type": null
+        "role": "unclear",
+        "timepoint": {
+          "label": null,
+          "value": null,
+          "unit": null
+        },
+        "polarity": "unclear",
+        "outcome_type": "unclear"
       }
     ]
   },
-
   "trial_structure": {
     "regimens": [
       {
@@ -77,63 +108,57 @@
             "component_id": "RC1",
             "kind": "drug",
             "drug_name": null,
-            "dose": { "value": null, "unit": null },
-            "frequency": { "code": null, "label": null },
-            "route": null,
-            "duration": { "value": null, "unit": null }
+            "dose": {
+              "value": null,
+              "unit": null
+            },
+            "frequency": {
+              "code": null,
+              "label": null
+            },
+            "route": "unclear",
+            "duration": {
+              "value": null,
+              "unit": null
+            }
           }
-        ],
-        "regimen_notes": null
+        ]
       }
     ],
-
     "arms": [
       {
         "arm_id": "A1",
         "label": null,
-        "type": null,
+        "type": "unclear",
         "regimen_id": "R1",
         "sample_size": null
-      },
-
-      {
-        "arm_id": "A2",
-        "label": null,
-        "type": null,
-        "regimen_id": "R2",
-        "sample_size": null
       }
     ],
-
     "analysis_groups": [
       {
-        "group_id": "G1",
-        "label": null,
-        "member_arm_ids": [],
-        "pooling_method": null,
-        "notes": "Use this for pooled arms (e.g., 10mg+25mg), combination arms, or factorial groupings."
+        "group_id": "AG1",
+        "population_id": "P1",
+        "description": null
       }
     ],
-
     "comparisons": [
       {
         "comparison_id": "C1",
-
         "treatment": {
           "ref_type": "arm",
           "ref_id": "A1"
         },
-
         "control": {
           "ref_type": "arm",
           "ref_id": "A2"
         },
-
-        "population_id": null,
+        "population_id": "P1",
         "analysis_set": null,
-
-        "timepoint": { "label": null, "value": null, "unit": null },
-
+        "timepoint": {
+          "label": null,
+          "value": null,
+          "unit": null
+        },
         "model_spec": {
           "adjustment": null,
           "model_family": null,
@@ -142,69 +167,62 @@
       }
     ]
   },
-
   "effect_estimates": [
     {
       "estimate_id": "E1",
       "comparison_id": "C1",
       "outcome_id": "O1",
-
-      "population_id": null,
+      "population_id": "P1",
       "analysis_set": null,
-      "timepoint": { "label": null, "value": null, "unit": null },
-
-      "estimate_type": null,
+      "timepoint": {
+        "label": null,
+        "value": null,
+        "unit": null
+      },
+      "estimate_type": "unclear",
       "value": null,
-
-      "ci": { "lower": null, "upper": null, "level": null },
+      "ci": {
+        "lower": null,
+        "upper": null,
+        "level": null
+      },
       "p_value": null,
-
-      "direction": null,
+      "direction": "unclear",
       "effect_notes": null
     }
   ],
-
   "mechanism_evidence": {
     "target_actions": [
       {
-        "evidence_id": "M1",
+        "action_id": "TA1",
         "drug_name": null,
-        "relation": null,
-        "target": { "symbol": null },
-        "support": { "source": null, "confidence": null }
+        "target": null,
+        "action_type": "unclear",
+        "evidence_source": null
       }
     ],
-
     "biomarker_effects": [
       {
-        "evidence_id": "M2",
-        "linked_estimate_id": null,
-        "comparison_id": null,
-        "biomarker": { "name": null, "unit": null },
-        "timepoint": { "label": null, "value": null, "unit": null },
-
-        "estimate_type": null,
-        "value": null,
-        "ci": null,
-        "p_value": null,
-
-        "direction": null
+        "biomarker_id": "B1",
+        "name": null,
+        "effect": "unclear",
+        "notes": null
       }
     ],
-
     "claims": [
       {
         "claim_id": "MC1",
         "text": null,
-        "scope": null,
-        "confidence": null
+        "scope": "unclear",
+        "confidence": "unclear"
       }
     ]
   },
-
   "metadata": {
-    "extraction_mode": null,
-    "confidence": null,
-    "schema_version": "v1_patch_1"
+    "extraction_mode": "automated",
+    "confidence": "unclear",
+    "schema_version": "v2",
+    "annotator_id": null,
+    "timestamp": null
   }
 }

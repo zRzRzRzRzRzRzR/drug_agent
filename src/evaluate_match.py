@@ -1,19 +1,3 @@
-"""
-evaluate_match.py — Hard-match evaluation for extracted JSON against paper text.
-
-All numeric values in the extraction output MUST be traceable to the paper.
-This module provides:
-  1. Anchor number extraction from paper text
-  2. Per-field hard-match checking
-  3. Step-specific validators (PICO, structure, effects)
-  4. Error report generation for the review agent
-
-Design principle:
-  - Mechanical string matching FIRST (no LLM needed)
-  - Generate a structured error report
-  - Feed errors to review agent for correction or deletion
-"""
-
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,9 +5,9 @@ from typing import Any, Dict, List, Optional, Set
 
 
 class MatchSeverity(str, Enum):
-    ERROR = "error"  # Value not found in paper — must fix or delete
-    WARNING = "warning"  # Value found but ambiguous / multiple candidates
-    INFO = "info"  # Structural check note
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
 
 
 @dataclass
@@ -33,16 +17,11 @@ class MatchResult:
     found: bool
     severity: MatchSeverity
     message: str
-    candidates: List[str] = field(default_factory=list)  # nearby matches if any
+    candidates: List[str] = field(default_factory=list)
 
 
 def extract_anchor_numbers(pdf_text: str) -> Set[str]:
-    """
-    Extract ALL numbers that appear in the paper text.
-    Returns a set of string representations for fast lookup.
-    """
     text_clean = pdf_text.replace("\n", " ").replace("\t", " ")
-
     raw_numbers = re.findall(r"(?<![a-zA-Z])(\d+\.?\d*)", text_clean)
 
     anchor_set: Set[str] = set()
@@ -65,16 +44,13 @@ def extract_anchor_numbers(pdf_text: str) -> Set[str]:
 
 
 def hard_match_value(val: Any, anchor_set: Set[str], pdf_text: str) -> bool:
-    """
-    Check if a numeric value can be traced to the paper text.
-    """
     if val is None:
         return True
 
     try:
         num = float(val)
     except (ValueError, TypeError):
-        return True  # Non-numeric, skip
+        return True
 
     candidates = [
         f"{num:.1f}",
@@ -92,7 +68,6 @@ def hard_match_value(val: Any, anchor_set: Set[str], pdf_text: str) -> bool:
         if c in anchor_set:
             return True
 
-    # Fallback: search in collapsed text
     text_collapsed = pdf_text.replace(" ", "").replace("\n", "")
     for c in candidates:
         if c in text_collapsed:
@@ -101,25 +76,39 @@ def hard_match_value(val: Any, anchor_set: Set[str], pdf_text: str) -> bool:
     return False
 
 
-class HardMatchEvaluator:
-    """
-    Evaluates extracted JSON blocks against the paper text.
-    All numeric values must be traceable.
-    """
+# Valid enums
+_VALID_ACTION_TYPES = {"inhibitor", "agonist", "antagonist", "modulator", "unclear"}
+_VALID_DIRECTIONS = {
+    "treatment_better",
+    "control_better",
+    "no_significant_difference",
+    "inconclusive",
+    "unclear",
+}
+_VALID_ESTIMATE_TYPES = {
+    "mean_difference",
+    "risk_ratio",
+    "odds_ratio",
+    "hazard_ratio",
+    "risk_difference",
+    "rate_ratio",
+    "unclear",
+}
+_VALID_POLARITIES = {"higher_better", "lower_better", "neutral", "unclear"}
 
+
+class HardMatchEvaluator:
     def __init__(self, pdf_text: str):
         self.pdf_text = pdf_text
         self.anchor_set = extract_anchor_numbers(pdf_text)
 
     def check_value(self, value: Any, field_path: str) -> Optional[MatchResult]:
-        """Check a single numeric value. Returns None if value is None/non-numeric."""
         if value is None:
             return None
-
         try:
             float(value)
         except (ValueError, TypeError):
-            return None  # Non-numeric, no check needed
+            return None
 
         found = hard_match_value(value, self.anchor_set, self.pdf_text)
         if found:
@@ -142,14 +131,11 @@ class HardMatchEvaluator:
     def _check_numeric_fields(
         self, obj: Any, path_prefix: str, target_fields: Optional[Set[str]] = None
     ) -> List[MatchResult]:
-        """Recursively check all numeric fields in an object."""
         results = []
-
         if isinstance(obj, dict):
             for key, val in obj.items():
                 full_path = f"{path_prefix}.{key}" if path_prefix else key
                 if target_fields and key not in target_fields:
-                    # Still recurse into nested objects
                     if isinstance(val, (dict, list)):
                         results.extend(
                             self._check_numeric_fields(val, full_path, target_fields)
@@ -179,17 +165,15 @@ class HardMatchEvaluator:
 
         return results
 
-    def check_pico(self, pico: Dict) -> List[MatchResult]:
-        """
-        Check PICO block: sample_size, age stats, sex percents, timepoint values.
-        """
-        results = []
+    # -------------------------------------------------------------------
+    # PICO checks
+    # -------------------------------------------------------------------
 
-        # Numeric fields to check in population
+    def check_pico(self, pico: Dict) -> List[MatchResult]:
+        results = []
         population = pico.get("population", {})
         results.extend(self._check_numeric_fields(population, "pico.population"))
 
-        # Outcomes timepoints
         outcomes = pico.get("outcomes", [])
         for i, outcome in enumerate(outcomes):
             tp = outcome.get("timepoint", {})
@@ -202,10 +186,6 @@ class HardMatchEvaluator:
         return results
 
     def check_pico_consistency(self, pico: Dict) -> List[MatchResult]:
-        """
-        Structural consistency checks for PICO:
-        - Sub-population sample_size <= base_population sample_size
-        """
         results = []
         population = pico.get("population", {})
         base_pop = population.get("base_population", {})
@@ -221,46 +201,76 @@ class HardMatchEvaluator:
                             value=ap_n,
                             found=True,
                             severity=MatchSeverity.ERROR,
-                            message=(
-                                f"Analysis population {ap.get('population_id')} sample_size={ap_n} "
-                                f"> base_population sample_size={base_n}"
-                            ),
+                            message=f"Analysis population sample_size ({ap_n}) > base_population ({base_n})",
+                        )
+                    )
+
+        # v2: Safety outcome polarity should be neutral
+        for i, outcome in enumerate(pico.get("outcomes", [])):
+            role = outcome.get("role", "")
+            polarity = outcome.get("polarity", "")
+            if role == "safety" and polarity not in ("neutral", "unclear", None):
+                results.append(
+                    MatchResult(
+                        field_path=f"pico.outcomes[{i}].polarity",
+                        value=polarity,
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"Safety outcome O{i+1} has polarity='{polarity}', expected 'neutral' for safety outcomes",
+                    )
+                )
+
+        return results
+
+    # -------------------------------------------------------------------
+    # Design consistency checks (v2)
+    # -------------------------------------------------------------------
+
+    def check_design_consistency(
+        self, linkage_design: Dict, pico: Dict
+    ) -> List[MatchResult]:
+        """Check consistency between design and PICO."""
+        results = []
+        design = linkage_design.get("design", {}).get("reported", {})
+        allocation = design.get("allocation", "unclear")
+
+        comparators = pico.get("comparators", [])
+        if allocation == "single-arm" and len(comparators) > 0:
+            # Check if any comparator has meaningful content
+            for i, comp in enumerate(comparators):
+                ctype = comp.get("type", "")
+                label = comp.get("label", "")
+                if ctype and ctype not in ("unclear",) and label:
+                    results.append(
+                        MatchResult(
+                            field_path=f"pico.comparators[{i}]",
+                            value=comp.get("comparator_id"),
+                            found=True,
+                            severity=MatchSeverity.ERROR,
+                            message=f"allocation='single-arm' but comparator {comp.get('comparator_id')} exists with type='{ctype}'. Single-arm studies should have comparators=[]",
                         )
                     )
 
         return results
 
-    def check_trial_structure(
-        self, structure: Dict, pico: Optional[Dict] = None
-    ) -> List[MatchResult]:
-        """
-        Check trial_structure block:
-        - Regimen dose/duration values
-        - Arm sample sizes
-        - Arm.regimen_id references valid regimen
-        - Comparison treatment/control ref_ids reference valid arms/groups
-        """
+    # -------------------------------------------------------------------
+    # Trial structure checks
+    # -------------------------------------------------------------------
+
+    def check_trial_structure(self, structure: Dict, pico: Dict) -> List[MatchResult]:
         results = []
 
-        regimens = structure.get("regimens", [])
+        # Numeric hard-match on arms sample_size, dose values, duration values
+        results.extend(self._check_numeric_fields(structure, "trial_structure"))
+
+        # Reference integrity checks
         regimen_ids = set()
-        for i, reg in enumerate(regimens):
+        for reg in structure.get("regimens", []):
             regimen_ids.add(reg.get("regimen_id"))
-            results.extend(
-                self._check_numeric_fields(reg, f"trial_structure.regimens[{i}]")
-            )
 
-        arms = structure.get("arms", [])
         arm_ids = set()
-        for i, arm in enumerate(arms):
+        for i, arm in enumerate(structure.get("arms", [])):
             arm_ids.add(arm.get("arm_id"))
-            # Sample size check
-            n = arm.get("sample_size")
-            r = self.check_value(n, f"trial_structure.arms[{i}].sample_size")
-            if r and not r.found:
-                results.append(r)
-
-            # Regimen reference check
             rid = arm.get("regimen_id")
             if rid and rid not in regimen_ids:
                 results.append(
@@ -273,12 +283,10 @@ class HardMatchEvaluator:
                     )
                 )
 
-        # Analysis groups
         group_ids = set()
         for g in structure.get("analysis_groups", []):
             group_ids.add(g.get("group_id"))
 
-        # Comparisons: reference checks
         valid_refs = arm_ids | group_ids
         for i, comp in enumerate(structure.get("comparisons", [])):
             for role in ("treatment", "control"):
@@ -300,6 +308,10 @@ class HardMatchEvaluator:
 
         return results
 
+    # -------------------------------------------------------------------
+    # Effect estimates checks
+    # -------------------------------------------------------------------
+
     def check_effect_estimates(
         self,
         effects: List[Dict],
@@ -307,23 +319,17 @@ class HardMatchEvaluator:
         valid_outcome_ids: Set[str],
         valid_population_ids: Set[str],
     ) -> List[MatchResult]:
-        """
-        Check effect_estimates:
-        - value, CI bounds, p_value must all be in paper
-        - comparison_id, outcome_id, population_id must reference upstream IDs
-        """
         results = []
 
         for i, est in enumerate(effects):
             prefix = f"effect_estimates[{i}]"
             eid = est.get("estimate_id", f"E{i+1}")
 
-            # Numeric hard match: value
+            # Numeric hard match
             r = self.check_value(est.get("value"), f"{prefix}.value")
             if r and not r.found:
                 results.append(r)
 
-            # CI bounds
             ci = est.get("ci", {})
             if isinstance(ci, dict):
                 for bound in ("lower", "upper"):
@@ -331,7 +337,6 @@ class HardMatchEvaluator:
                     if r and not r.found:
                         results.append(r)
 
-            # p_value
             p = est.get("p_value")
             if p is not None:
                 r = self.check_value(p, f"{prefix}.p_value")
@@ -375,7 +380,36 @@ class HardMatchEvaluator:
                     )
                 )
 
+            # v2: Enum validation
+            est_type = est.get("estimate_type")
+            if est_type and est_type not in _VALID_ESTIMATE_TYPES:
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.estimate_type",
+                        value=est_type,
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"Estimate {eid} has invalid estimate_type='{est_type}'. Valid: {_VALID_ESTIMATE_TYPES}",
+                    )
+                )
+
+            direction = est.get("direction")
+            if direction and direction not in _VALID_DIRECTIONS:
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.direction",
+                        value=direction,
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"Estimate {eid} has invalid direction='{direction}'. Valid: {_VALID_DIRECTIONS}",
+                    )
+                )
+
         return results
+
+    # -------------------------------------------------------------------
+    # Mechanism evidence checks
+    # -------------------------------------------------------------------
 
     def check_mechanism_evidence(
         self,
@@ -383,15 +417,50 @@ class HardMatchEvaluator:
         valid_comparison_ids: Set[str],
         valid_estimate_ids: Set[str],
     ) -> List[MatchResult]:
-        """
-        Check mechanism_evidence:
-        - biomarker_effects numeric values
-        - comparison_id / linked_estimate_id references
-        """
         results = []
+
+        # v2: Validate ID prefixes
+        for i, ta in enumerate(mechanism.get("target_actions", [])):
+            aid = ta.get("action_id", "")
+            if aid and not aid.startswith("TA"):
+                results.append(
+                    MatchResult(
+                        field_path=f"mechanism_evidence.target_actions[{i}].action_id",
+                        value=aid,
+                        found=True,
+                        severity=MatchSeverity.ERROR,
+                        message=f"target_actions action_id should start with 'TA' (e.g. TA1), got '{aid}'",
+                    )
+                )
+
+            # v2: Validate action_type enum
+            action_type = ta.get("action_type", "")
+            if action_type and action_type not in _VALID_ACTION_TYPES:
+                results.append(
+                    MatchResult(
+                        field_path=f"mechanism_evidence.target_actions[{i}].action_type",
+                        value=action_type,
+                        found=True,
+                        severity=MatchSeverity.ERROR,
+                        message=f"Invalid action_type='{action_type}'. Valid values: {_VALID_ACTION_TYPES}. "
+                        f"Use 'inhibitor' not 'inhibits', 'agonist' not 'activates', etc.",
+                    )
+                )
 
         for i, bm in enumerate(mechanism.get("biomarker_effects", [])):
             prefix = f"mechanism_evidence.biomarker_effects[{i}]"
+
+            bid = bm.get("biomarker_id", "")
+            if bid and not bid.startswith("B"):
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.biomarker_id",
+                        value=bid,
+                        found=True,
+                        severity=MatchSeverity.ERROR,
+                        message=f"biomarker_effects biomarker_id should start with 'B' (e.g. B1), got '{bid}'",
+                    )
+                )
 
             # Numeric checks
             r = self.check_value(bm.get("value"), f"{prefix}.value")
@@ -436,12 +505,40 @@ class HardMatchEvaluator:
                     )
                 )
 
+        # v2: Validate claim IDs
+        for i, claim in enumerate(mechanism.get("claims", [])):
+            cid = claim.get("claim_id", "")
+            if cid and not cid.startswith("MC"):
+                results.append(
+                    MatchResult(
+                        field_path=f"mechanism_evidence.claims[{i}].claim_id",
+                        value=cid,
+                        found=True,
+                        severity=MatchSeverity.ERROR,
+                        message=f"claims claim_id should start with 'MC' (e.g. MC1), got '{cid}'",
+                    )
+                )
+
+            # v2: scope must be single value
+            scope = claim.get("scope", "")
+            if scope and "," in str(scope):
+                results.append(
+                    MatchResult(
+                        field_path=f"mechanism_evidence.claims[{i}].scope",
+                        value=scope,
+                        found=True,
+                        severity=MatchSeverity.ERROR,
+                        message=f"claims scope must be single value, got '{scope}'. Split into multiple claims if needed.",
+                    )
+                )
+
         return results
 
+    # -------------------------------------------------------------------
+    # Report generation
+    # -------------------------------------------------------------------
+
     def generate_error_report(self, results: List[MatchResult]) -> str:
-        """
-        Generate a human/LLM-readable error report for the review agent.
-        """
         errors = [r for r in results if r.severity == MatchSeverity.ERROR]
         warnings = [r for r in results if r.severity == MatchSeverity.WARNING]
 
@@ -468,7 +565,6 @@ class HardMatchEvaluator:
         return "\n".join(lines)
 
     def generate_structured_report(self, results: List[MatchResult]) -> Dict:
-        """Generate a machine-readable report."""
         return {
             "total_checks": len(results),
             "errors": len([r for r in results if r.severity == MatchSeverity.ERROR]),

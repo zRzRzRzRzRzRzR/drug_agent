@@ -1,0 +1,1286 @@
+{
+  // ============================================================
+  // Drug Agent v2 =）
+  //【用途】：该文件用于优化v1的不足。
+  // 整体来说，v1可以做到基础的结构化提取，但是从细节来看缺少理解，v2尽可能教会agent多一点的细节。
+  //
+  //【全局缺失值约定】：
+  //   - enum 缺失：使用 "unclear"
+  //   - string / number / object 缺失：使用 null
+  //   - array 缺失：使用 []
+  //
+  //【全局 ID 约定】：
+  // 唯一性：每个 ID 在单篇文档内必须唯一
+  // 不同实体类型之间允许编号重复，但前缀必须区分，例如：P1 ≠ I1 ≠ O1
+  // 引用一致性：所有跨字段引用必须通过 ID 进行（禁止用文本匹配）
+  //   P0 = base population 字段路径：pico.population.base_population.population_id 说明：基础或子人群
+  //   P1, P2... = analysis populations 字段路径：pico.population.analysis_populations[].population_id 说明：分析人群
+  //   I1, I2... = interventions 字段路径：pico.interventions[].intervention_id 说明：干预
+  //   K1, K2... = comparators 字段路径：pico.comparators[].comparator_id 说明：对照
+  //   O1, O2... = outcomes 字段路径：pico.outcomes[].outcome_id 说明：结局
+  //   R1, R2... = regimens 字段路径：trial_structure.regimens[].regimen_id 说明：方案组成
+  //   RC1, RC2... = Regimen component 字段路径：trial_structure.regimens[].components[].component_id
+  //   A1, A2... = arms 字段路径：trial_structure.arms[].arm_id 说明：试验分组
+  //   AG1, AG2... = analysis group 字段路径：trial_structure.analysis_groups[].group_id 说明：分析人群
+  //   C1, C2... = comparisons 字段路径：trial_structure.comparisons[].comparison_id
+  //   E1, E2... = effect estimates 字段路径：effect_estimates[].estimate_id
+  //   TA1, TA2... = Target action 字段路径：mechanism_evidence.target_actions[].action_id
+  //   B1, B2... = Biomarker effect 字段路径：mechanism_evidence.biomarker_effects[].biomarker_id
+  //   MC1, MC2... = mechanism claims 字段路径： mechanism_evidence.claims[].claim_id
+  // 
+  //【全局 步骤约定】：
+  // step0_split
+  // step1_linkage_design
+  // step2_pico
+  // step3_trial_structure
+  // Step 3.5: Cross-layer Mapping / Reconciliation
+  // 目的：在 pico 语义层与 trial_structure 结构层之间建立显式映射关系，回填 mapped_regimen_ids，并检查跨层一致性。
+  // 输入：Step 2 的 pico.population / interventions / comparators / outcomes
+  //      Step 3 的 trial_structure.regimens / arms / comparisons
+  // 输出：回填：interventions[].mapped_regimen_ids & comparators[].mapped_regimen_ids
+  // 规则：若某 intervention/comparator 可明确对应一个或多个 regimen，则写入对应 regimen_id
+  //      若无法确定唯一映射，不得猜测；保留 []
+  //      该步骤只做跨层对齐，不新增未经上游支持的实体
+  // 校正点：intervention/comparator 与 regimen 的药物成分、给药方式、组合关系是否一致
+  //       单臂试验中 comparator 是否应为空
+  // step4_effects
+  // step5_mechanism
+  // ============================================================
+  // SHARED FIELD RULES（适用于所有 population 层级）
+  // ============================================================
+  // age:
+  // - 保留原文统计形式（mean/SD 或 median/IQR），不做换算
+  // - 不根据其他统计量推断缺失值
+  // - 若未报告，填 null
+  // sex:
+  // - 优先填写百分比
+  // - 若仅给人数且总样本量明确，可换算为百分比
+  // - 不强制总和为 100（允许缺失或四舍五入误差）
+  // - 若未报告，填 null
+  // ============================================================
+
+  // ************************************************************
+  // step 1
+  // ************************************************************
+  // ============================================================
+  // 1. trial_linkage
+  // ============================================================
+  //【用途】：
+  //   记录论文与临床试验注册号/文献数据库编号之间的链接信息。
+  //   该层主要用于溯源，不直接参与 effect size 计算，但对追踪证据来源至关重要。
+  //
+  //【标注原则】：
+  //   - 仅填写文中明确报告或可从论文元数据直接确认的信息。
+  //   - 不凭常识补全。
+  //   - 若文中没有，string 字段填 null；数组字段填 []。
+  //
+  "trial_linkage": {
+    //
+    // 字段：nct_ids
+    // ClinicalTrials.gov 注册号列表。
+    // 类型：array[string]
+    // 示例： ["NCT02314442"]
+    // 若未报告，填 []。
+    "nct_ids": [],
+
+    // 字段：pmid
+    // PubMed ID。
+    // 类型：string | null
+    // 示例："34567890"
+    // 若论文无 PMID 或未确认，填 null。
+    "pmid": null,
+
+    // 字段：doi
+    // DOI 编号。
+    // 类型：string | null
+    // 示例："10.1056/NEJMoa1609243"
+    // 建议保留标准 DOI 形式，不加 URL 前缀。
+    // 扫描整个文档，尤其注意：标题/页眉部分（优先级最高），摘要，页脚
+    // 将 https://doi.org/xxx 转换为 xxx
+    "doi": null,
+
+    // 字段：pmcid
+    // PubMed Central ID。
+    // 类型：string | null
+    // 示例："PMC2494629"
+    // 若论文未收录于 PMC 或未报告，填 null。
+    "pmcid": null
+  },
+
+  // ============================================================
+  // 2. design
+  // ============================================================
+  //【用途】：
+  //   描述研究设计的核心方法学特征，包括是否随机、盲法、分组结构和是否多中心。
+  //   该层是对 trial design 的简化抽象，便于后续过滤和分层分析。
+  //
+  //【标注原则】：
+  //   - 仅在 study design / trial design / methods 相关语境中判断。
+  //   - 不得在 background、discussion 或 random forest 等无关语境中误判。
+  //   - 所有字段为单选枚举，禁止自由文本。
+  "design": {
+    "reported": {
+      //【含义】：是否进行了随机分配（Randomization） → 是否将受试者随机分配到不同干预组
+      //【可选值】："yes" | "no" | "unclear"
+      //【判定】：
+      //   yes      → randomized / randomised / randomly assigned
+      //   no       → non-randomized / observational / single-arm
+      //   unclear  → 未明确说明
+      //【例子】："patients were randomly assigned (1:1) to receive..." → "randomized": "yes"
+      //      "open-label, single-arm study" → "randomized": "no"
+      //【与其他字段关系】： 与 allocation 强相关：
+      // 若 randomized 为 "yes"，则 allocation 通常是 parallel / crossover，allocation 绝不可能是 "single-arm"
+      "randomized": "unclear",
+
+      //【含义】：盲法类型（Blinding / Masking）→ 是否对受试者 / 研究者 / 评估者进行信息遮蔽
+      //【可选值】："open-label" | "single-blind" | "double-blind" | "triple-blind" | "unclear"
+
+      // "open-label" 
+      //【判定】：明确说明研究未采用盲法，或参与方知晓分组
+      //【例子】：
+      // - "open-label"
+      // - "no blinding"
+      // - "participants and investigators were aware of treatment"
+      // - "non-blinded study"
+      //【规则】：
+      // - 仅在文中明确说明未盲法、开放标签、或所有关键角色知晓分组时使用。 → 判为 open-label
+      // - 即使部分盲（例如 only assessor blinded）但明确写“open-label” → 仍优先标记为 open-label（优先遵循原文标签） 
+
+      // "single-blind" 
+      //【判定】：仅一个角色被遮蔽（通常为受试者 或 评估者）
+      // 明确只有一类角色被遮蔽时使用，例如 participant-blinded 或 assessor-blinded。
+      //【例子】：
+      // - "single-blind"
+      // - "participants were blinded"
+      // - "assessor-blinded"
+      // - "investigator-blinded"（仅一方）
+      //【规则】：
+      // - 必须明确只有一类角色被盲
+      // - 如果只写“blinded”但未说明是谁 → 不判为 single-blind（→ unclear）
+      // - assessor-blinded（评估者盲）也归入 single-blind
+
+      // "double-blind"
+      //【判定】：至少两类关键角色被遮蔽（通常为受试者 + 研究者）
+      //【例子】：
+      // - "double-blind"
+      // - "double-masked"
+      // - "participants and investigators were blinded"
+      // - "patient- and investigator-blinded"
+      //【规则】：
+      // - 明确两个角色被遮蔽即可
+      // - 如果写“double-blind”但未展开说明 → 仍判为 double-blind（优先信任标准术语）
+      // - 如果写“blinded”但未说明数量 → 不判（→ unclear）
+
+      // "unclear"
+      //【判定】：无法明确判断盲法类型
+      //【触发条件】：
+      // - 未提及 blinding / masking
+      // - 信息冲突（不同段落描述不一致）
+      //【规则】：
+      // - 不允许基于常识推断（例如 RCT ≠ 必然 double-blind）
+      // - 不允许根据 placebo 推断存在盲法
+
+      //【优先级规则】：
+      // 若文本中明确给出标准标签（open-label / double-blind 等），
+      // 优先采用该标签，而不是根据细节重新推断
+      "blinding": "unclear",
+
+      //【含义】：受试者分配结构（Study Allocation / Design Structure）
+      // 描述参与者如何被分配到不同干预方案
+      //【可选值】：
+      //   "parallel" | "crossover" | "factorial" |
+      //   "single-arm" | "other" | "unclear"
+      //【判定必须基于】：Methods / Study Design / Trial Design
+
+      // "parallel"
+      //【判定】：受试者被分配到 ≥2 个独立组，每组接受不同干预，且不交叉
+      //【触发表述】：
+      // - "parallel-group"
+      // - "randomized controlled trial"
+      // - "patients were randomized to receive A or B"
+      // - "assigned to two groups"
+      //【规则】：
+      // - 只要存在多个独立组且无交叉 → 判为 parallel
+      // - 若为 RCT 且未说明其他结构 → 默认 parallel
+
+      // "crossover"
+      //【判定】：同一受试者在不同时间接受多个干预（顺序切换）
+      //【触发表述】：
+      // - "crossover"
+      // - "cross-over"
+      // - "2-period crossover"
+      // - "each patient received both treatments"
+      //【规则】：
+      // - 必须明确“同一受试者接受多个 treatment”
+      // - 若未明确顺序切换 → 不判（→ unclear）
+
+      // "factorial"
+      //【判定】：同时研究多个因素（例如 A×B），存在组合分组
+      //【触发表述】：
+      // - "factorial design"
+      // - "2x2 design"
+      // - "patients were randomized to A, B, A+B, or placebo"
+      //【规则】：
+      // - 必须存在“多因素组合”
+      // - 仅多个 arms ≠ factorial
+
+      // "single-arm"
+      //【判定】：只有一个干预组，无正式对照组
+      //【触发表述】：
+      // - "single-arm"
+      // - "single group"
+      // - "all patients received X"
+      // - "no control group"
+      //【规则】：
+      // - 必须明确无 comparator
+      // - 如果存在 placebo / control / comparison → 不可判为 single-arm
+      // - 模糊情况下 → unclear（不要猜）
+
+      // "other"
+      //【判定】：明确有结构，但不属于以上类别
+      //【示例】：
+      // - adaptive design
+      // - cluster randomized trial
+      // - stepped-wedge design
+      //【规则】：
+      // - 仅在明确不属于上述类别时使用
+      // - 不作为默认兜底（否则会污染数据）
+
+      // "unclear"
+      //【判定】：无法从文本明确判断分配结构
+      //【触发情况】：
+      // - 未描述分组方式
+      // - 仅提到 intervention，没有分组信息
+      // - 描述模糊或冲突
+      //【规则】：
+      // - 不允许根据常识推断
+      // - 不允许根据样本量或结果推测
+
+      //【优先级规则】：
+      // 若满足： - 有 ≥2 组 & 无交叉描述 → 默认判为 parallel
+      // 只有在明确写“无对照”时才判 single-arm
+      // 若文本明确出现：
+      // "parallel-group", "crossover", "factorial" → 直接采用
+      "allocation": "unclear",
+
+      //【含义】：是否为多中心研究（是否在多个独立研究地点开展）
+      // 可选值："yes" | "no" | "unclear"
+      // 判定：
+      //   yes → ≥2 distinct study sites / centers / hospitals / institutions
+      //   no  → 明确为单一地点
+      // - unclear: 无法判断或描述模糊
+
+      // "yes"
+      //【判定】：明确 ≥2 个独立研究地点
+      //【触发表述】：
+      // - "multicenter" / "multi-centre"
+      // - "conducted at multiple sites"
+      // - "across X centers"
+      // - "two sites" / "three hospitals"
+      // - "conducted at A and B"
+      //【规则】：
+      // - 只要明确 ≥2 个地点 → yes
+      // - 不要求出现 "multicenter"
+      // - “sites / centers / hospitals / institutions” 均等价
+
+      // "no"
+      //【判定】：明确只有一个研究地点
+      //【触发表述】：
+      // - "single-center" / "single-centre"
+      // - "conducted at a single site"
+      // - 明确只有一个机构名称（且无其他地点）
+      //【规则】：
+      // - 必须明确只有一个地点
+      // - 如果只出现一个机构，但未明确是否唯一 → 不判（→ unclear）
+
+      // "unclear"
+      //【判定】：无法确定研究地点数量
+      //【触发情况】：
+      // - 未描述 study setting
+      // - 只出现一个机构，但未说明是否唯一
+      // - 描述模糊（例如 "a research center"）
+      //【规则】：
+      // - 不允许根据常识推断
+      "multicenter": "unclear"
+    }
+  },
+
+
+  // ************************************************************
+  // step 2
+  // ************************************************************
+  // ============================================================
+  // 3. pico
+  // ============================================================
+  //【用途】：
+  //   从研究问题层面对 Population / Intervention / Comparator / Outcome 进行抽取。
+  //   该层兼顾语义可读性与最小结构化，不直接承担复杂计算。
+  "pico": {
+    // ------------------------------------------------------------
+    // 3.1 population
+    // ------------------------------------------------------------
+    "population": {
+      //【含义】基础总体（base population）：表示论文最核心、最原始的纳入对象定义。
+      // 一般固定 population_id = "P0"。
+      "base_population": {
+        // 基础总体唯一 ID。
+        // 固定写为 "P0"。
+        "population_id": "P0",
+
+        //【含义】对基础总体的自然语言描述。
+        // 类型：string | null
+        // 应描述研究最原始纳入对象（eligibility / enrolled population），
+        // 不要混入分析集限定、结局限定或随访完成条件。
+        // 优先贴近 inclusion criteria / study population 的原文表述。
+        // 若文中未明确描述，填 null。
+        "description": null,
+
+        //【含义】基础总体样本量。
+        // 类型：integer | null
+        // 仅填写研究最原始纳入总体（base population）的人数。
+        // 不得用 ITT / mITT / PP / safety population 人数替代。
+        // 若全文仅报告分析集人数，且无法确认其等于基础总体，则填 null。
+        "sample_size": null,
+
+        // 地理信息对象。
+        // 若国家和区域都未报告，则 country_list = []，region = null。
+        // country_list 仅填写文中明确报告的研究地点国家，不根据作者单位推断。
+        // region 可根据已明确国家归纳；若国家未明且未直接报告区域，则填 null。
+        "region": {
+          // 明确报告的国家列表。
+          // 类型：array[string]
+          "country_list": [],
+
+          // 宏观区域。
+          // 推荐值：
+          //   "North America" | "South America" | "Europe" | "Asia" |
+          //   "Africa" | "Oceania" | "Middle East" | "Global" | null
+          "region": null
+        },
+
+        // 年龄统计信息。
+        // 尽量按原文统计方式保留，不强行转换。
+        // 不根据 median 估算 mean，不根据 mean 估算 median。
+        // 不根据 IQR 推算 SD。
+        "age": {
+          // 平均年龄。若原文报告 mean ± SD，则填写。
+          "mean": null,
+
+          // 年龄标准差。与 mean 配对使用。
+          "sd": null,
+
+          // 年龄中位数。若原文报告 median (IQR)，则填写。
+          "median": null,
+
+          // 四分位距。建议保留原文格式，如 "48–62"。
+          "iqr": null,
+
+          // 最小年龄。若文中有年龄范围则填写。
+          "range_min": null,
+
+          // 最大年龄。若文中有年龄范围则填写。
+          "range_max": null
+        },
+
+        // 性别构成。
+        // 优先填写百分比；若原文给人数且可换算，可填写百分比。
+        // 不要求 female_percent + male_percent + other_percent 必须等于 100，允许因缺失、四舍五入或未报告其他性别而不闭合。
+        "sex": {
+          "female_percent": null,
+          "male_percent": null,
+          "other_percent": null
+        }
+      },
+
+      // 分析人群列表。
+      // 例如 ITT / mITT / PP / safety population / subgroup。
+      // 仅当论文明确报告某个分析集、亚组或衍生人群时才创建条目。
+      // 不要因为不同表格或不同结局重复建 population。
+      // 若文中没有明确分析集，可填 []。
+      "analysis_populations": [
+        {
+          // 分析集唯一 ID。
+          // 推荐编号："P1"、"P2"、"P3"...
+          "population_id": "P1",
+
+          // 来源 population ID。
+          // 表示该分析集从哪个上级 population 派生而来。
+          // 默认指向 "P0"；只有当文中明确说明该人群来自另一个已定义分析集时，才可指向其他 population_id。
+          "derived_from": "P0",
+
+          //【含义】分析集角色：表示该 population 在统计分析中的功能定位，而不是结果重要性。
+          //【可选值】：
+          //   "primary" | "secondary" | "safety" |
+          //   "subgroup" | "exploratory" | null
+          //【判定规则】：
+          // - 仅当论文明确说明该人群在分析中的角色时才填写；否则填 null。
+          // - 不得根据常识或结局类型（primary endpoint / secondary endpoint）推断 role。
+          // - 不得因为样本量不同或表格分开就创建不同 role。
+
+          // "primary"
+          // - 明确出现：
+          // "primary analysis population"
+          // "primary efficacy population"
+          // "primary analysis set"
+          // - 或明确用于 primary endpoint 的主要分析人群
+          // - 若只是 primary outcome ≠ primary population（不要混淆）
+
+          // "secondary"
+          // - 明确出现：
+          // "secondary analysis population"
+          // "secondary analysis set"
+          // - 或明确用于补充分析（非主要分析）的人群
+          // - 若仅是次要结局（secondary endpoint）对应的分析，不等同于 secondary population（需谨慎）
+
+          // "safety"
+          // - 明确出现：
+          // "safety population"
+          // "safety set"
+          // "all patients who received at least one dose"
+          // - 通常用于 adverse events / tolerability 分析
+
+          // "subgroup"
+          // - 明确为某个子集分析：
+          // "subgroup analysis"
+          // "patients aged ≥65"
+          // "male patients"
+          // "patients with baseline HbA1c > 8%"
+          // - 必须是从更大 population 派生的子集（derived subset）
+
+          // "exploratory"
+          // - 明确出现：
+          // "exploratory analysis"
+          // "post hoc analysis"
+          // - 或作者明确标注为探索性分析人群
+
+          // null
+          // - 未明确说明角色
+          // - 仅出现 ITT / PP / FAS 等名称但未说明其分析角色
+          // - 信息不足或存在歧义
+
+          //【优先级规则】：
+          // - 若文本明确给出 "safety population" → 优先标记为 safety
+          // - 若同时涉及 primary / secondary，但未明确人群区分 → 统一填 null（不要猜）
+          "role": null,
+
+          //【含义】分析集名称：表示论文明确命名的分析集/分析人群名称，优先做有限标准化。
+          //【可选值】：
+          //   "intent-to-treat"
+          //   "modified intent-to-treat"
+          //   "per-protocol"
+          //   "safety population"
+          //   "full analysis set"
+          //【判定规则】：
+          // - 仅当论文明确命名某个分析集时才填写；否则填 null。
+          // - analysis_set 表示“该人群叫什么分析集名称”，不是其分析角色；不要与 role 混用。
+          // - 优先保留标准化名称；缩写如 ITT / mITT / PP / FAS 需归一化。
+          // - 不得仅根据人群定义自行创造名称。
+          // - 若原文只描述人群定义（如 "all patients who received at least one dose"），
+          // 只有在上下文明确等同于某个命名分析集时才填写对应标准值，否则填 null。
+          //【标准化映射】：
+          // - "ITT", "intention-to-treat", "intent-to-treat population/set" → "intent-to-treat"
+          // - "mITT", "modified intention-to-treat", "modified intent-to-treat" → "modified intent-to-treat"
+          // - "PP", "per protocol", "per-protocol population/set" → "per-protocol"
+          // - "safety population", "safety set" → "safety population"
+          // - "FAS", "full analysis set" → "full analysis set"
+          //【禁止推断】：
+          // - 不得将 "full analysis set" 自动改写为 "intent-to-treat"
+          // - 不得将 "all treated patients" 自动改写为 "safety population"
+          // - 不得因其用于主要分析就自动填写 "intent-to-treat"
+          //【冲突处理】：
+          // - 若同一人群同时出现原文名称与缩写，按标准化名称填写。
+          // - 若不同段落对该分析集命名不一致且无法统一，填 null。
+          "analysis_set": null,
+
+          // 该分析集样本量。
+          "sample_size": null,
+
+          // 若论文分别报告该分析集的地区信息，则填写；否则一般填 null 或空结构。
+          "region": {
+            "country_list": [],
+            "region": null
+          },
+
+          // 该分析集年龄信息。
+          //【规则】：见 SHARED FIELD RULES
+          "age": {
+            "mean": null,
+            "sd": null,
+            "median": null,
+            "iqr": null,
+            "range_min": null,
+            "range_max": null
+          },
+
+          // 该分析集性别构成。
+          //【规则】：见 SHARED FIELD RULES
+          "sex": {
+            "female_percent": null,
+            "male_percent": null,
+            "other_percent": null
+          }
+        }
+      ]
+    },
+
+    // ------------------------------------------------------------
+    // 3.2 interventions
+    // ------------------------------------------------------------
+    // 作用：
+    //   粗粒度表达研究问题层面的干预，不承担精细剂量/频率建模。
+    "interventions": [
+      {
+        // 干预唯一 ID。推荐 "I1"、"I2"...
+        "intervention_id": "I1",
+
+        // 干预语义概括描述。
+        // 用简洁短语概括该干预，不要直接复制整段方法描述。
+        // // 应表达“研究问题层面”的干预含义，而非细粒度给药方案。
+        // 例如："Simple algorithm for mealtime insulin adjustment"
+        "label": null,
+
+        // 干预类型。
+        // 按该 intervention 在研究问题中的主要干预本质分类。
+        // 若同时包含多个不可分的干预成分，再判为 "combination"。
+        // 不因给药载体或实施工具改变主要类型。
+        // 可选值：
+        //   "drug" | "procedure" | "behavioral" |
+        //   "device" | "combination" | "other" | "unclear"
+        "type": "unclear",
+
+        // 干预涉及的主要药物成分。
+        // 仅填写主要药物通用名/活性成分。
+        // 不填写剂量、频率、剂型、商品名修饰信息。
+        // 非药物干预一般填 []。
+        // 如无法识别，填 []。
+        // pico.interventions[].drug_list 中的药物名称，必须在映射的 trial_structure.regimens[].components[].drug_name 中全部出现。
+        "drug_list": [],
+
+        // 与 trial_structure.regimens 的映射。
+        // 用于把粗粒度 intervention 对应到具体 regimen。
+        // 仅填写在 trial_structure.regimens 中已存在的 regimen_id。
+        // 可一对多映射；若无法可靠对应，则填 []。
+        // 类型：array[string]
+        "mapped_regimen_ids": [],
+
+        // 备注。
+        // 用于补充语义说明，不写细粒度剂量等结构信息。
+        // 仅补充 intervention 层面的语义说明。
+        // 不写可独立结构化的剂量、频率、疗程或随机化信息。
+        "notes": null
+      }
+    ],
+
+    // ------------------------------------------------------------
+    // 3.3 comparators
+    // ------------------------------------------------------------
+    //【含义】：粗粒度表达研究问题层面的对照条件。
+    // 仅当论文存在明确对照条件时才创建 comparator 条目。
+    // 若研究无正式对照（如 single-arm / open-label extension / all participants received the intervention），填 []，不要构造“no comparator”条目。
+    // 若 allocation 是 "single-arm"，那么 pico.comparators 必须为 []。
+    // 冲突点：如果 Agent 在 comparators 里写了 "Placebo"，但在 allocation 里写了 "single-arm"，这就是典型的逻辑自相矛盾。
+
+    "comparators": [
+      {
+        // 对照唯一 ID。推荐 "K1"、"K2"...
+        "comparator_id": "K1",
+
+        // 对照条件描述。
+        // 用简洁短语概括对照条件，不要写解释性句子（如 "No comparator..."）。
+        "label": null,
+
+        // 对照类型。
+        //【可选值】：
+        //   "placebo" | "active comparator" | "standard of care" |
+        //   "no treatment" | "behavioral comparator" | "unclear"
+        //【判定规则】：
+        // - placebo: 明确为 placebo / matching placebo
+        // - active comparator: 明确为另一种主动治疗/药物/程序
+        // - standard of care: 明确为 usual care / standard care / conventional therapy
+        // - no treatment: 明确存在一个“未接受研究干预”的对照条件/对照组，而不是“没有 comparator”
+        // - behavioral comparator: 明确为教育、咨询、生活方式干预等行为层面对照
+        // - unclear: 存在对照，但类型无法判断
+        //【注意】：
+        // - 若研究根本没有 comparator，则 comparators = []，不得创建 type="no treatment" 的伪对照。
+        "type": "unclear",
+
+        // 与具体 regimen 的映射。
+        // 仅映射到已存在的对照 regimen；若无可靠对应则填 []。
+        "mapped_regimen_ids": [],
+
+        // 备注。
+        // 仅补充 comparator 层面的简短说明；不要写“本研究无对照”等解释性占位文本。
+        "notes": null
+      }
+    ],
+
+    // ------------------------------------------------------------
+    // 3.4 outcomes
+    // ------------------------------------------------------------
+    //【全局规则】：
+    // - role / polarity / outcome_type 必须基于“稳定语义”判断，而非上下文结果
+    // - 若存在歧义，优先选择 "unclear"，禁止猜测
+
+    "outcomes": [
+      {
+        // outcome 唯一 ID。推荐 "O1"、"O2"...
+        "outcome_id": "O1",
+
+        // outcome 描述。
+        // 应尽量贴近原文，如：
+        //   "Change in HbA1c from baseline to 24 weeks"
+        "label": null,
+
+        // 结局角色。
+        // 【可选值】：
+        // "primary" | "secondary" | "exploratory" |
+        //  "safety" | "unclear"
+        // 【判定规则】：
+        // - primary: 明确出现 primary endpoint / primary outcome 或明确说明“主要评价指标”
+        // - secondary: 明确出现 secondary endpoint / secondary outcome
+        // - exploratory: 明确出现 exploratory endpoint / exploratory analysis 或 post hoc / hypothesis-generating analysis
+        // - safety: - 明确用于安全性评估，如：adverse events / serious adverse events / safety profile
+        // - unclear: - 未明确标注角色，且无法从结构性表达判断
+        //【注意】：- 不允许根据“重要性”或“是否写在摘要中”主观判断 primary
+        // - 若文中仅列出多个 outcomes 但未分 primary/secondary → 全部标记 "unclear"
+        // - safety outcome（如 AE）即使是 secondary endpoint，也优先标记为 "safety"
+        // - 不允许一个 outcome 同时属于多个 role（必须单选）        
+        "role": "unclear",
+
+        // 观察时间点。
+        // 若无法结构化，则保留 label，其他字段可为 null。
+        "timepoint": {
+          "label": null,
+          "value": null,
+          "unit": null
+        },
+
+        // 指标方向：数值意义上的“好/坏”方向）
+        //【可选值】：
+        // "higher_better" | "lower_better" | "neutral" | "unclear"
+        // 【判定规则】：
+        // higher_better:
+        // - 生存类指标：overall survival, progression-free survival
+        // - 响应率：response rate, remission rate
+        // - 功能改善：quality of life score（若明确为“更高更好”）
+        // lower_better:
+        // - 疾病负担/风险：HbA1c, blood pressure, tumor size
+        // - 事件发生：mortality rate, relapse rate, adverse events
+        // neutral:
+        // - 仅为描述性指标（无明确好坏方向），如：drug concentration, biomarker level（未说明意义）
+        // unclear:
+        // - 无法判断该指标增加或减少代表好或坏
+        //【注意】：
+        // - polarity 是“医学意义方向”，不是 effect value 的正负号
+        // - 不允许根据结果（如数值下降）反推 polarity
+        // - 同一 outcome 在不同论文中 polarity 应保持一致（如 HbA1c 永远是 lower_better）
+        // - composite endpoint（如 MACE）通常为 lower_better
+        "polarity": "unclear",
+
+        // outcome 数据类型。
+        //【可选值】：
+        // "continuous" | "binary" | "time-to-event" |
+        //  "ordinal" | "count" | "unclear"
+        // 【判定规则】：
+        // continuous:
+        // - 连续数值：mean / SD / change from baseline
+        // - 如：HbA1c, blood pressure, score change
+        // binary:
+        // - 二分类事件：yes/no
+        // - 如：死亡（alive/dead）、response（responder/non-responder）
+        // time-to-event:
+        // - 生存分析数据：overall survival, progression-free survival, time to event
+        // - 通常对应 hazard ratio
+        // ordinal:
+        // - 有序分类：disease severity scale, Likert scale
+        // count:
+        // - 计数数据：number of events, hospitalization次数
+        // unclear: 无法判断数据类型
+        //【注意】：
+        // - 不要用统计方法反推类型（例如出现 HR → 才是 time-to-event，而不是反过来）
+        // - "change in HbA1c" → 仍然是 continuous（不是 difference 类型）
+        // - response rate (%) → binary（不是 continuous）
+        // - 若同时出现多种表达（如连续+分类），优先按“主要分析形式”判断
+        // 若 outcomes.outcome_type 为 "time-to-event"，则在 effect_estimates 中，estimate_type 必须优先寻找 "hazard_ratio"，禁止使用 "mean_difference"。
+        "outcome_type": "unclear"
+      }
+    ]
+  },
+
+  // ************************************************************
+  // step 3
+  // ************************************************************
+  // ============================================================
+  // 4. trial_structure
+  // ============================================================
+  // 用途：
+  //   将 PICO 进一步转化为“可计算的对比结构”，用于后续 effect estimate 抽取。
+  "trial_structure": {
+    // ------------------------------------------------------------
+    // 4.1 regimens
+    // ------------------------------------------------------------
+    "regimens": [
+      {
+        // regimen 唯一 ID。推荐 "R1"、"R2"...
+        "regimen_id": "R1",
+
+        // 治疗方案描述。
+        "label": null,
+
+        // 组成成分列表。
+        "components": [
+          {
+            // 成分唯一 ID。推荐 "RC1"、"RC2"...
+            "component_id": "RC1",
+
+            // 成分类型。
+            //【可选值】：
+            // "drug" | "procedure" | "behavioral" | "device" | "other"
+            //【判定规则】：
+            // drug: 明确为药物成分，如具体通用名、商品名或药物类别
+            // procedure: 明确为医疗操作、手术、介入、放疗等程序性干预
+            // behavioral: 明确为教育、咨询、饮食管理、运动管理、剂量调整算法、依从性训练等行为/管理类干预
+            // device: 明确为医疗器械、监测设备、给药装置等
+            // other: 明确存在干预成分，但不属于上述类型
+            //【注意】：
+            // 若一个 regimen 同时包含药物和行为管理，应拆成多个 component，而不是强行只标一种 kind
+            // 不允许因为 regimen 整体属于“药物试验”就把所有 component 都标成 "drug"
+            "kind": "drug",
+
+            // 药物名称。仅 kind="drug" 时填写。
+            //【判定规则】：
+            // 优先填写通用名（generic name）
+            // 若原文仅提供商品名，且可明确对应通用名，可标准化为通用名
+            // 若仅能确认药物类别（如 "chemotherapy"、"insulin therapy"）而无法明确具体药物，则可保留原文类别或填 null（按团队规范统一）
+            // 非 drug component 不得填写 drug_name
+            //【注意】：
+            // 不要将联合方案名称（如 "standard chemotherapy regimen"）直接填入 drug_name
+            // 多药联合应拆为多个 drug component
+            "drug_name": null,
+
+            // 剂量信息。原文未报告则 value/unit 均为 null。
+            "dose": {
+              "value": null,
+              "unit": null
+            },
+
+            // 给药频率。
+            // code：标准化频率编码 
+            // label 可保留原文表述。
+            //【code 可选值】："QD" | "BID" | "TID" | "QID" | "PRN"
+            //【判定规则】：
+            // QD: once daily / once a day / daily / every day
+            // BID: twice daily / two times daily
+            // TID: three times daily
+            // QID: four times daily
+            // PRN: as needed / as required
+            //【映射规则】：
+            // 仅当原文频率可以“无歧义映射”为上述标准编码时，才填写 code
+            // 若原文频率无法映射（如 weekly、every 2 weeks、monthly、continuous infusion 等），则：code = null
+            //【注意】：
+            // 不得为了填写 code 而进行近似或错误映射（如 weekly → QD 是错误的）
+            // label 应尽量保留原文完整表达（如 "once weekly", "every 2 weeks"）
+            // code 与 label 语义必须一致，禁止出现冲突
+            // 若文中未报告频率，则 code = null 且 label = null            
+            "frequency": {
+              "code": null,
+              "label": null
+            },
+
+            // 给药途径。
+            //【可选值】：
+            // "oral" | "intravenous" | "subcutaneous" |
+            // "intramuscular" | "inhalation" | "topical" | "unclear"
+            //【判定规则】：
+            // oral: 明确为 oral / by mouth
+            // intravenous: 明确为 IV / intravenous infusion / intravenous injection
+            // subcutaneous: 明确为 SC / subcutaneous
+            // intramuscular: 明确为 IM / intramuscular
+            // inhalation: 明确为 inhaled / inhalation
+            // topical: 明确为 topical / transdermal / local application（若团队接受归并）
+            // unclear: 给药存在，但途径未明确
+            //【注意】：
+            // 不得根据药物常识推断 route
+            "route": "unclear",
+
+            // 持续时间。
+            "duration": {
+              "value": null,
+              "unit": null
+            }
+          }
+        ]
+      }
+    ],
+
+    // ------------------------------------------------------------
+    // 4.2 arms
+    // ------------------------------------------------------------
+    "arms": [
+      {
+        // arm 唯一 ID。推荐 "A1"、"A2"...
+        "arm_id": "A1",
+
+        // 分组标签。
+        "label": null,
+
+        // 分组类型。
+        //【可选值】：
+        // "experimental" | "active_comparator" | "placebo_comparator" |
+        // "standard_of_care" | "control" | "unclear"
+        //【判定规则】：
+        // experimental: 明确为研究干预组、试验药组、新策略组
+        // active_comparator: 明确为另一种主动治疗作为对照组
+        // placebo_comparator: 明确为 placebo / matching placebo 组
+        // standard_of_care: 明确为 usual care / standard care / conventional therapy 组
+        // control: 明确存在对照组，但无法进一步判断属于主动对照、安慰剂或标准治疗
+        // unclear: 分组存在，但组别性质无法判断
+        //【注意】：
+        // arms.type 是“组别角色”，comparators.type 是“对照条件语义类型”，两者不要混用
+        // 若文中仅写 treatment group / control group，通常 treatment group → experimental，control group → control
+        "type": "unclear",
+
+        // 该 arm 对应的 regimen ID。
+        // 必须引用 regimens 中已定义的 regimen_id。
+        "regimen_id": "R1",
+
+        // 该 arm 样本量。
+        "sample_size": null
+      }
+    ],
+
+    // ------------------------------------------------------------
+    // 4.3 analysis_groups（可选）
+    // ------------------------------------------------------------
+    //【用途】：
+    // 仅在论文明确报告某个 comparison / estimate 针对特定分析分组，且该分组无法仅用 population + analysis_set 表达时使用
+    //【注意】：
+    // 若 population.analysis_populations 已足够表达分析对象，则可不创建 analysis_groups
+    // 不得将 analysis_groups 作为 population 的重复拷贝
+    // 若当前任务不依赖 analysis_groups，可保持 []
+    "analysis_groups": [
+      {
+        // 分析组 ID。
+        "group_id": "AG1",
+
+        // 对应的 population_id。
+        "population_id": "P1",
+
+        // 描述。
+        "description": null
+      }
+    ],
+
+    // ------------------------------------------------------------
+    // 4.4 comparisons
+    // ------------------------------------------------------------
+    "comparisons": [
+      {
+        // comparison 唯一 ID。推荐 "C1"、"C2"...
+        "comparison_id": "C1",
+
+        // 处理组引用。
+        // ref_type："arm" 或 "regimen"
+        // ref_id：对应的 arm_id 或 regimen_id
+        "treatment": {
+          "ref_type": "arm",
+          "ref_id": "A1"
+        },
+
+        // 对照组引用。
+        // treatment / control 引用。
+        //【ref_type 可选值】：
+        // "arm" | "regimen"
+        // 【判定规则】：
+        // 优先引用 arm，因为 effect estimate 通常对应实际研究分组
+        // 仅当文中未显式区分 arm，但明确存在治疗方案层面对比时，才使用 regimen
+        //【注意】：
+        // 同一篇文献内 comparisons 的引用层级应尽量一致
+        // - 若 arm 已定义，不建议 comparison 再直接引用 regimen，除非确有必要
+        "control": {
+          "ref_type": "arm",
+          "ref_id": "A2"
+        },
+
+        // 对应的人群 ID。
+        // 应与某个 population_id 一致，如 "P1"。
+        "population_id": "P1",
+
+        // 分析集名称。
+        // 通常与上游 analysis_set 体系一致。
+        "analysis_set": null,
+
+        // 时间点。
+        "timepoint": {
+          "label": null,
+          "value": null,
+          "unit": null
+        },
+
+        // 统计模型说明。
+        "model_spec": {
+          // 协变量调整说明。
+          // 可为简短文字，如 "adjusted for age and sex"。
+          "adjustment": null,
+
+          // 模型家族。
+          //【可选值】：
+          // "ANCOVA" | "linear_regression" | "logistic_regression" |
+          // "cox_model" | "mixed_model" | "unclear"
+          //【判定规则】：
+          // 仅当文中明确报告统计模型时填写
+          // ANCOVA: 明确出现 ANCOVA / analysis of covariance
+          // linear_regression: 明确为 linear regression
+          // logistic_regression: 明确为 logistic regression
+          // cox_model: 明确为 Cox proportional hazards model / Cox model
+          // mixed_model: 明确为 mixed model / mixed-effects model / MMRM
+          // unclear: 存在统计分析，但模型类型未明确
+          "model_family": null,
+
+          // 备注，用于补充统计实现细节。
+          "notes": null
+        }
+      }
+    ]
+  },
+
+  // ************************************************************
+  // step 4
+  // ************************************************************
+  // ============================================================
+  // 5. effect_estimates
+  // ============================================================
+  // 用途：
+  //   记录 comparison + outcome + population + timepoint 对应的统计效应值。
+  //   是 meta-analysis、causal inference、evidence grading 的核心输入。
+  //【证据来源优先级】：
+  // - estimate_type 优先依据 Results、tables、figure legends 中明确报告的统计指标
+  // - p_value 优先提取与当前 comparison + outcome + population + timepoint 明确对应的数值
+  // - direction 优先依据结果段落中的明确结论性表述；若无，则依据统计信息派生判断
+  // - Discussion / Conclusion 中的概括性语言不能单独作为 estimate_type 或 p_value 的唯一依据
+  //【全局规则】：
+  // - effect_estimates 记录的是“文中明确报告或可稳定归一”的统计效应，不是任意结果描述
+  // - estimate_type、p_value、direction 三者必须分别独立判断，禁止互相机械反推
+  // - 若存在歧义，优先保守填写：
+  // - estimate_type = "unclear"
+  // - p_value = null
+  // - direction = "inconclusive" 或 "unclear"
+  "effect_estimates": [
+    {
+      // effect estimate 唯一 ID。推荐 "E1"、"E2"...
+      "estimate_id": "E1",
+
+      // 引用 comparison_id。
+      "comparison_id": "C1",
+
+      // 引用 outcome_id。
+      "outcome_id": "O1",
+
+      // 引用 population_id。
+      "population_id": "P1",
+
+      // 分析集名称。
+      "analysis_set": null,
+
+      // 时间点。
+      "timepoint": {
+        "label": null,
+        "value": null,
+        "unit": null
+      },
+
+      // 效应类型。
+      //【可选值】：
+      // "mean_difference" | "risk_ratio" | "odds_ratio" |
+      // "hazard_ratio" | "risk_difference" | "rate_ratio" | "unclear"
+      //【判定规则】：
+      // mean_difference: 明确报告组间均值差、change difference、difference in means
+      // - 常见表达：mean difference, between-group difference, least-squares mean difference
+      // risk_ratio: 明确报告 risk ratio / relative risk / RR
+      // odds_ratio: 明确报告 odds ratio / OR
+      // hazard_ratio: 明确报告 hazard ratio / HR
+      // risk_difference: 明确报告 absolute risk difference / difference in proportions / absolute difference
+      // rate_ratio: 明确报告 incidence rate ratio / event rate ratio / rate ratio
+      // unclear: 存在统计结果，但无法明确归入上述类型
+      //【映射规则】：必须优先依据文中“明确命名”的效应指标进行映射
+      // 若文中仅报告原始组间结果（如两组均值、两组事件率），但未明确给出标准化效应指标，则 estimate_type = "unclear"
+      //【注意】：
+      // 不得根据 outcome_type 机械反推 estimate_type
+      // 不得仅根据 p 值、显著性或方向判断 estimate_type
+      // 不得将 regression coefficient、adjusted effect、beta value 机械归入 mean_difference
+      // 若文中仅写“significant difference”而未给出具体效应形式，则 estimate_type = "unclear"
+      "estimate_type": "unclear",
+
+      // 效应值。
+      // 必须与 estimate_type 一致，如 HR / OR / RR / MD 等。
+      "value": null,
+
+      // 置信区间。
+      // 若未报告，可整个对象为 null；若保留对象，则子字段可为 null。
+      "ci": {
+        "lower": null,
+        "upper": null,
+        "level": null
+      },
+
+      // p 值。
+      //【类型】：number | null
+      //【判定规则】：
+      // 若文中明确给出精确 p 值（如 p=0.032），则填写对应数值
+      // 若文中仅给出阈值表达（如 p<0.05、p≤0.001），当前字段仅保留数值部分：
+      // - p<0.05  → p_value = 0.05
+      // - p≤0.001 → p_value = 0.001
+      // 若文中仅写 NS / not significant / nonsignificant，则 p_value = null
+      // 若文中仅写 significant / statistically significant 但未给出具体 p 值，则 p_value = null
+      // 若未报告 p 值，则 p_value = null
+      //【注意】：
+      // 不得将 "NS"、"significant"、"p<0.05" 直接写成字符串
+      // p_value 字段只保留数值，不保留比较符号
+      // 若团队后续需要保留比较符号，应新增独立字段（如 p_value_relation），不要混写在 p_value 中
+      // 不得根据 confidence interval 是否跨 1 / 0 反推 p 值      
+      "p_value": null,
+
+      // 方向。
+      //【可选值】：
+      // "treatment_better" | "control_better" |
+      // "no_significant_difference" | "inconclusive" | "unclear"
+      //【判定规则】：
+      // treatment_better: 文中明确支持 treatment 优于 control，且方向与 outcome.polarity 一致
+      // control_better: 文中明确支持 control 优于 treatment，且方向与 outcome.polarity 一致
+      // no_significant_difference: 文中明确报告无统计学显著差异 或 p_value 对应阈值为 >= 0.05
+      // inconclusive: 存在效应值或部分统计信息，但不足以稳定判断方向
+      // unclear: 缺乏必要信息，无法判断结论方向
+      //【判定优先级】：
+      // 先看文中是否有明确结论性表述（如 superior / inferior / no significant difference / non-inferior）
+      // 再结合 p 值、estimate value、outcome.polarity 综合判断
+      // 若这些信息之间冲突，则优先标记 "inconclusive"
+      //【注意】：
+      // direction 不是直接复制 effect value 的正负号
+      // direction 必须结合 outcome.polarity 判断
+      // 不得仅因 p<0.05 就标记 treatment_better
+      // 对 non-inferiority / equivalence 研究，不应机械标为 treatment_better；通常标记为 "no_significant_difference"，并在 effect_notes 中说明
+
+      //【direction 辅助判定示例】：
+      // - 若 outcome.polarity = "lower_better"，且 treatment 的效应方向表示“更低/更少”，并达到统计学支持 → "treatment_better"
+      // - 若 outcome.polarity = "higher_better"，且 treatment 的效应方向表示“更高/更长”，并达到统计学支持 → "treatment_better"
+      // - 若 outcome.polarity = "lower_better"，但结果显示 treatment 更高/更多，且达到统计学支持 → "control_better"
+      // - 若 outcome.polarity = "unclear"，通常不应仅凭效应值填写 treatment_better / control_better，应优先标记 "inconclusive" 或 "unclear"
+      "direction": "unclear",
+
+      // 备注。
+      // 用于记录 non-inferiority / equivalence / graph-only 等特殊情况。
+      "effect_notes": null
+    }
+  ],
+
+  // ************************************************************
+  // step 5
+  // ************************************************************
+  // ============================================================
+  // 6. mechanism_evidence
+  // ============================================================
+  // 用途：
+  //   补充论文中的机制解释、生物标志物变化和结论性陈述。
+  //   主要服务于人类理解、知识图谱构建和机制层补充，而非直接 effect size 计算。
+  //【收录范围规则】：
+  // - mechanism_evidence 仅收录论文中明确出现的机制解释、biomarker变化和结论性陈述
+  // - 不收录纯背景知识、教科书式药理介绍、与本研究结果无直接关系的泛化常识
+  // - 不得基于外部数据库或模型先验知识补全文中未明确给出的机制关系
+  // - 若某条信息已在 outcomes 或 effect_estimates 中完整表达，则 mechanism_evidence 仅保留其“解释性”或“总结性”部分，不做机械重复
+  "mechanism_evidence": {
+    // ------------------------------------------------------------
+    // 6.1 target_actions
+    // ------------------------------------------------------------
+    "target_actions": [
+      {
+        // 机制动作唯一 ID。
+        "action_id": "TA1",
+
+        // 药物名称。
+        "drug_name": null,
+
+        // 靶点名称，如蛋白/基因。
+        "target": null,
+
+        // 作用类型。
+        //【可选值】：
+        // "inhibitor" | "agonist" | "antagonist" | "modulator" | "unclear"
+        //【判定规则】：
+        // inhibitor: 文中明确表述该药物/干预抑制某靶点或通路
+        // - 常见表达：inhibits, inhibitor of, suppresses
+        // agonist: 文中明确表述激动某受体/通路
+        // antagonist: 文中明确表述拮抗某受体/通路
+        // modulator: 文中明确表述调节某通路/靶点，但无法稳定归入 inhibitor / agonist / antagonist
+        // unclear: 存在机制相关描述，但作用方向或类型无法明确
+        //【注意】：
+        // 仅记录文中明确表述的 drug–target–action 关系
+        // 不得依据药物常识、数据库知识或训练语料自动补全 target 或 action_type
+        // 若文中只出现药物类别名称（如 "PARP inhibitor"），可标注 action_type="inhibitor"，但 target 仅在文中明确出现时填写
+        // 若机制描述仅为推测性语言（如 may act through, possibly mediated by），仍可记录，但应在 evidence_source 或 notes 中体现其来源/不确定性
+        "action_type": "unclear",
+
+        // 证据来源
+        //【判定规则】：
+        // 记录该机制信息来自论文中的哪个语境，如："abstract", "results", "discussion", "conclusion"
+        //【注意】：
+        // 建议优先记录论文内部证据来源，避免与外部知识混淆
+        "evidence_source": null
+      }
+    ],
+
+    // ------------------------------------------------------------
+    // 6.2 biomarker_effects
+    // ------------------------------------------------------------
+    "biomarker_effects": [
+      {
+        // 生物标志物唯一 ID。
+        "biomarker_id": "B1",
+
+        // 生物标志物名称。
+        "name": null,
+
+        // 变化方向。
+        //【可选值】：
+        // "increase" | "decrease" | "no_change" | "unclear"
+        //【判定规则】：
+        // increase: 文中明确报告该 biomarker 升高、上调、增加
+        // decrease: 文中明确报告该 biomarker 降低、下调、减少
+        // no_change: 文中明确报告无显著变化或未见变化
+        // unclear: 提到 biomarker，但变化方向无法判断
+        //【注意】：biomarker_effects 仅用于记录“生物标志物变化”或机制相关分子 readout
+        // 若某指标已在 outcomes 中作为正式临床/试验结局建模，是否在 biomarker_effects 中重复记录，必须按团队规范统一
+        "effect": "unclear",
+
+        // 备注。
+        "notes": null
+      }
+    ],
+
+    // ------------------------------------------------------------
+    // 6.3 claims
+    // ------------------------------------------------------------
+    //【claim 来源优先级】：
+    // - 优先提取 Abstract conclusion、Discussion、Conclusion 中的明确结论句
+    // - 若 Results 中有直接结论性表述，也可提取
+    // - Introduction / Background 中的文献综述性陈述，通常不作为本文 claims
+    "claims": [
+      {
+        // 结论文本。
+        // 结论性 claim 唯一 ID。推荐 "MC1"、"MC2"...
+        //【判定规则】：
+        // 应尽量贴近原文结论语义，允许轻度规范化，但不得改变结论强度
+        // 不得将推测性语言改写为确定性陈述
+        // 不得将多句内容强行合并为一个过宽泛的总结
+        //【注意】：
+        // "may improve outcomes" 不得改写为 "improves outcomes"
+        // "was well tolerated" 可保留为安全性 claim，但不要扩写为“safe and effective”
+        "claim_id": "MC1",
+
+        // 结论文本。
+        // 应尽量贴近原文语义，可轻度规范化。
+        "text": null,
+
+        // claim 范围。
+        //【可选值】：
+        // "clinical efficacy" | "safety" | "mechanism" |
+        // "biomarker" | "pharmacokinetics" | "unclear"
+        //【判定规则】：
+        // clinical efficacy: claim 主要描述疗效、疾病改善、临床获益、症状控制、生存获益等
+        // safety: claim 主要描述安全性、耐受性、不良反应
+        // mechanism: claim 主要描述作用机制、通路解释、药理学解释
+        // biomarker: claim 主要描述某生物标志物变化及其意义
+        // pharmacokinetics: claim 主要描述暴露、吸收、分布、代谢、消除、浓度-时间特征
+        // unclear: claim 存在，但主题范围无法稳定归类
+        //【注意】：
+        // scope 按 claim 的“核心主旨”选择单一值，不按句中出现的所有元素多选
+        // 若同一句同时包含疗效和安全性，优先按该句主结论选择；必要时拆成两个 claim
+        "scope": "unclear",
+
+        // 证据强度。
+        //【可选值】：
+        // "high" | "moderate" | "low" | "unclear"
+        //【判定规则】：
+        // high: claim 直接由本文主要结果支持，且结果明确、设计较强（如随机对照试验主要结论）
+        // moderate: claim 有本文结果支持，但证据为次要分析、探索性分析、间接支持或结果不够完整
+        // low: claim 主要来自作者解释、讨论推测、机制假说、样本量较小的探索性发现，或缺乏直接结果支持
+        // unclear: 无法判断 claim 的证据强度
+        //【注意】：
+        // confidence 表示“该 claim 被本文支持的强度”，不是统计显著性
+        // 不得仅因 p<0.05 就标记为 high
+        // 不得仅因句子写在结论部分就标记为 high
+        // 含 may, might, suggests, could, potentially 等推测性语言的 claim，通常不应标记为 high
+        "confidence": "unclear"
+      }
+    ]
+  },
+
+  // ============================================================
+  // 7. metadata
+  // ============================================================
+  // 用途：
+  //   描述本条记录的提取方式、质量评估和 schema 版本。
+  //   metadata 不描述研究本身，而描述“这条结构化数据是如何得到的”。
+  "metadata": {
+
+    // 数据提取方式。
+    // 【可选值】：
+    // "manual_fulltext" | "manual_abstract" |
+    // "llm_assisted" | "automated"
+    //【判定规则】：
+    // manual_fulltext: 人工基于全文逐字段提取并校验，最终结果由人工主导
+    // manual_abstract: 人工仅基于摘要提取，未使用全文信息
+    // llm_assisted: LLM 参与提取，但最终结果经过人工逐字段校验或修正
+    // automated: 完全由程序/LLM自动生成，无人工逐字段校验
+    //【注意】：
+    // 判定依据为“最终结果的责任归属”，而不是是否使用过 LLM
+    // 若人工仅做轻度浏览但未逐字段验证，应标记为 "automated"，而不是 "llm_assisted"
+    // 不允许混合标注（必须单选）
+    "extraction_mode": "manual_fulltext",
+
+    // 整体质量/可信度。
+    //【可选值】：
+    // "high" | "moderate" | "low" | "unclear"
+    //【判定规则】：
+    // high:
+    // - 基于全文（fulltext）提取
+    //  - 关键结构完整（trial_structure + effect_estimates 基本完整）
+    // - 无明显字段冲突或引用错误
+    // moderate:
+    // - 存在部分字段缺失（如缺少部分 effect_estimates 或 population 信息）
+    // - 或部分字段存在不确定性（如 unclear 较多）
+    // low:
+    // - 仅基于摘要或信息严重不完整
+    // - 或存在明显结构不一致、字段冲突或错误
+    // unclear: 无法评估质量
+    //【注意】：
+    // confidence 评估的是“结构化数据质量”，不是论文质量
+    // 不得根据期刊级别、研究类型（RCT vs observational）或结果显著性判断 confidence
+    // 不得因为字段多就标高；必须看一致性与完整性
+    //【自动降级规则】：
+    // - 若 extraction_mode = "automated"，且未进行人工校验，则 confidence 不得标为 "high"
+    // - 若关键字段（如 comparison / outcome / effect_estimates）存在缺失或冲突，应至少降为 "moderate"
+    // - 若仅基于摘要抽取 effect_estimates，应优先标记为 "low"
+    "confidence": "unclear",
+
+    // schema 版本。
+    //【标注规则】：
+    // 必须反映当前使用的字段结构与规则版本
+    // 若 schema 发生字段或规则修改，必须更新 version
+    //【注意】：
+    // 不得在不同 schema 结构下复用同一 version
+    "schema_version": "v2",
+
+    // 标注者 ID。
+    //【用途】：用于追踪数据来源、错误分析和一致性评估
+    //【注意】：
+    // automated 数据建议使用系统标识（如 "llm_v1_pipeline"）
+    // 人工标注建议使用固定 ID（避免匿名导致无法追溯）
+    "annotator_id": null,
+
+    // 时间戳。
+    // 可选。建议 ISO 8601 格式，如 "2026-03-17T21:30:00Z"
+    "timestamp": null
+  }
+}
+
+
