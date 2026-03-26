@@ -798,7 +798,7 @@ class DrugExtractionPipeline:
         ocr_text_func: Callable[[str], str],
         ocr_init_func: Optional[Callable] = None,
         ocr_output_dir: str = "./cache_ocr",
-        ocr_dpi: int = 200,
+        ocr_dpi: int = 400,
         ocr_validate_pages: bool = True,
         max_retries: int = 1,
     ):

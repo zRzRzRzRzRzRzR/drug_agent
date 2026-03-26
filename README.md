@@ -231,20 +231,20 @@ python batch_run.py \
 
 ### 常用参数
 
-| 参数 | 说明 |
-|------|------|
+| 参数 | 说明                                         |
+|------|--------------------------------------------|
 | `-i`, `--input-dir` | 输入目录，支持平铺 PDF 或含子文件夹（默认 `./evidence_card`） |
-| `-o`, `--output-dir` | 输出目录（默认 `./output`） |
-| `--batch-size` | 每批最多处理 N 个新 PDF（0 = 不限制，默认 0） |
-| `--batches` | 只处理指定的子文件夹（如 `--batches 00 01`，默认全部） |
-| `--max-workers` | 并发线程数（默认 1，即串行） |
-| `--model` | 覆盖默认 LLM 模型名 |
-| `--api-key` | 覆盖环境变量中的 API Key |
-| `--base-url` | 覆盖环境变量中的 Base URL |
-| `--ocr-dir` | OCR 缓存目录（默认 `./cache_ocr`） |
-| `--dpi` | PDF 转图片 DPI（默认 200） |
-| `--no-validate-pages` | 跳过 OCR 尾页过滤 |
-| `--resume` | 跳过已完成的文件（检查 `final.json` 是否存在） |
+| `-o`, `--output-dir` | 输出目录（默认 `./output`）                        |
+| `--batch-size` | 每批最多处理 N 个新 PDF（0 = 不限制，默认 0）              |
+| `--batches` | 只处理指定的子文件夹（如 `--batches 00 01`，默认全部）       |
+| `--max-workers` | 并发线程数（默认 1，即串行）                            |
+| `--model` | 覆盖默认 LLM 模型名                               |
+| `--api-key` | 覆盖环境变量中的 API Key                           |
+| `--base-url` | 覆盖环境变量中的 Base URL                          |
+| `--ocr-dir` | OCR 缓存目录（默认 `./cache_ocr`）                 |
+| `--dpi` | PDF 转图片 DPI（默认 400）                        |
+| `--no-validate-pages` | 跳过 OCR 尾页过滤                                |
+| `--resume` | 跳过已完成的文件（检查 `final.json` 是否存在）             |
 
 
 ## 输出说明
