@@ -8,7 +8,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .evaluate_match import HardMatchEvaluator
 from .llm_client import GLMClient
-from .review import review_effects_with_context, review_null_completeness, review_with_hard_match
+from .review import (
+    review_effects_with_context,
+    review_null_completeness,
+    review_with_hard_match,
+)
 
 _SRC_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SRC_DIR.parent
@@ -158,7 +162,9 @@ def _repair_linkage_design(result: Dict, schema: Dict) -> Dict:
     repaired = False
 
     # --- Check if trial_linkage is properly nested ---
-    if "trial_linkage" not in result or not isinstance(result.get("trial_linkage"), dict):
+    if "trial_linkage" not in result or not isinstance(
+        result.get("trial_linkage"), dict
+    ):
         # Try to salvage from malformed keys
         linkage = dict(expected_linkage)  # start from defaults
         flat_keys = list(result.keys())
@@ -279,7 +285,10 @@ def _repair_pico(pico: Dict) -> Dict:
     if pid != "P0":
         bp["population_id"] = "P0"
         if pid is not None:
-            print(f"[Step 2] Repair: base_population.population_id '{pid}' -> 'P0'", file=sys.stderr)
+            print(
+                f"[Step 2] Repair: base_population.population_id '{pid}' -> 'P0'",
+                file=sys.stderr,
+            )
         repaired = True
 
     # Fill sex complement if one side is missing
@@ -290,14 +299,20 @@ def _repair_pico(pico: Dict) -> Dict:
         if male is not None and female is None:
             try:
                 sex["female_percent"] = round(100.0 - float(male), 1)
-                print(f"[Step 2] Repair: female_percent = {sex['female_percent']} (100 - {male})", file=sys.stderr)
+                print(
+                    f"[Step 2] Repair: female_percent = {sex['female_percent']} (100 - {male})",
+                    file=sys.stderr,
+                )
                 repaired = True
             except (ValueError, TypeError):
                 pass
         elif female is not None and male is None:
             try:
                 sex["male_percent"] = round(100.0 - float(female), 1)
-                print(f"[Step 2] Repair: male_percent = {sex['male_percent']} (100 - {female})", file=sys.stderr)
+                print(
+                    f"[Step 2] Repair: male_percent = {sex['male_percent']} (100 - {female})",
+                    file=sys.stderr,
+                )
                 repaired = True
             except (ValueError, TypeError):
                 pass

@@ -1,6 +1,6 @@
 import json
 import sys
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .llm_client import GLMClient
 
@@ -170,11 +170,17 @@ def _log_null_fills(original: Dict, corrected: Dict, block_name: str) -> None:
     fills = []
     _diff_nulls(original, corrected, "", fills)
     if fills:
-        print(f"  [Review] {block_name} null-completeness: filled {len(fills)} fields", file=sys.stderr)
+        print(
+            f"  [Review] {block_name} null-completeness: filled {len(fills)} fields",
+            file=sys.stderr,
+        )
         for path, val in fills:
             print(f"    {path}: null -> {val}", file=sys.stderr)
     else:
-        print(f"  [Review] {block_name} null-completeness: no new values found", file=sys.stderr)
+        print(
+            f"  [Review] {block_name} null-completeness: no new values found",
+            file=sys.stderr,
+        )
 
 
 def _diff_nulls(orig: Any, corr: Any, path: str, fills: List) -> None:
