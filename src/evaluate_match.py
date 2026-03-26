@@ -138,8 +138,19 @@ class HardMatchEvaluator:
         if isinstance(age, dict):
             if age.get("range_min") is None:
                 candidate = self._find_number_near_keyword(
-                    ["age ≥", "age >=", "aged ≥", "aged >=", "≥ ", "years or older",
-                     "minimum age", "age range", "18 years", "age ⩾", "older than"]
+                    [
+                        "age ≥",
+                        "age >=",
+                        "aged ≥",
+                        "aged >=",
+                        "≥ ",
+                        "years or older",
+                        "minimum age",
+                        "age range",
+                        "18 years",
+                        "age ⩾",
+                        "older than",
+                    ]
                 )
                 if candidate:
                     results.append(
@@ -157,8 +168,17 @@ class HardMatchEvaluator:
 
             if age.get("range_max") is None:
                 candidate = self._find_number_near_keyword(
-                    ["age ≤", "age <=", "aged ≤", "aged <=", "≤ ", "years or younger",
-                     "maximum age", "younger than", "up to"]
+                    [
+                        "age ≤",
+                        "age <=",
+                        "aged ≤",
+                        "aged <=",
+                        "≤ ",
+                        "years or younger",
+                        "maximum age",
+                        "younger than",
+                        "up to",
+                    ]
                 )
                 if candidate:
                     results.append(
@@ -177,7 +197,10 @@ class HardMatchEvaluator:
         # --- Sex percentage ---
         sex = base_pop.get("sex", {})
         if isinstance(sex, dict):
-            if sex.get("female_percent") is None and sex.get("male_percent") is not None:
+            if (
+                sex.get("female_percent") is None
+                and sex.get("male_percent") is not None
+            ):
                 male_pct = sex["male_percent"]
                 try:
                     inferred = round(100.0 - float(male_pct), 1)
@@ -195,7 +218,10 @@ class HardMatchEvaluator:
                 except (ValueError, TypeError):
                     pass
 
-            if sex.get("male_percent") is None and sex.get("female_percent") is not None:
+            if (
+                sex.get("male_percent") is None
+                and sex.get("female_percent") is not None
+            ):
                 female_pct = sex["female_percent"]
                 try:
                     inferred = round(100.0 - float(female_pct), 1)
@@ -216,8 +242,18 @@ class HardMatchEvaluator:
         # --- Sample size ---
         if base_pop.get("sample_size") is None:
             candidate = self._find_number_near_keyword(
-                ["enrolled", "included", "participants", "patients", "subjects",
-                 "sample size", "n =", "N =", "ITT", "intention-to-treat"]
+                [
+                    "enrolled",
+                    "included",
+                    "participants",
+                    "patients",
+                    "subjects",
+                    "sample size",
+                    "n =",
+                    "N =",
+                    "ITT",
+                    "intention-to-treat",
+                ]
             )
             if candidate:
                 results.append(
@@ -237,12 +273,39 @@ class HardMatchEvaluator:
         if isinstance(region, dict) and not region.get("country_list"):
             # Quick scan for common country patterns
             country_keywords = [
-                "United States", "USA", "UK", "United Kingdom", "China", "Japan",
-                "Germany", "France", "Italy", "Spain", "Canada", "Australia",
-                "Brazil", "India", "Korea", "Netherlands", "Sweden", "Denmark",
-                "Norway", "Finland", "Belgium", "Switzerland", "Austria", "Poland",
-                "Israel", "Turkey", "Mexico", "Argentina", "South Africa",
-                "Russia", "Taiwan", "Hong Kong", "Singapore",
+                "United States",
+                "USA",
+                "UK",
+                "United Kingdom",
+                "China",
+                "Japan",
+                "Germany",
+                "France",
+                "Italy",
+                "Spain",
+                "Canada",
+                "Australia",
+                "Brazil",
+                "India",
+                "Korea",
+                "Netherlands",
+                "Sweden",
+                "Denmark",
+                "Norway",
+                "Finland",
+                "Belgium",
+                "Switzerland",
+                "Austria",
+                "Poland",
+                "Israel",
+                "Turkey",
+                "Mexico",
+                "Argentina",
+                "South Africa",
+                "Russia",
+                "Taiwan",
+                "Hong Kong",
+                "Singapore",
             ]
             found_countries = []
             text_lower = self.pdf_text.lower()
@@ -570,9 +633,7 @@ class HardMatchEvaluator:
 
         return results
 
-    def check_effects_null_completeness(
-        self, effects: List[Dict]
-    ) -> List[MatchResult]:
+    def check_effects_null_completeness(self, effects: List[Dict]) -> List[MatchResult]:
         """
         Check for effect_estimates with p_value but missing value/CI.
         This is a common extraction failure: LLM finds p-values but skips
