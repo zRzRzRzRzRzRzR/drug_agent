@@ -15,10 +15,29 @@ _REVIEW_SYSTEM_PROMPT = """
 - 对于每个标记为 ERROR 的字段，去论文原文中找到正确的值
 - 如果在论文中确实找不到该值，将其设为 null
 - 对于 WARNING 字段，检查并确认或修正
+- 特别注意：如果 WARNING 指出某个 null 字段在论文中可能存在对应值，请仔细搜索论文原文，如果确实能找到就填入正确值
 - 不要修改未标记为错误的字段
 - 不要捏造任何数值
 
 输出严格 JSON，结构与输入完全一致，只修正有问题的字段。
+"""
+
+_NULL_REVIEW_SYSTEM_PROMPT = """
+你是一名临床试验数据审核专家。你会收到：
+
+1. 从论文中提取的 JSON 数据块（部分字段为 null）
+2. 空值完整性检查报告（指出哪些 null 字段在论文中可能有对应值）
+3. 论文原文
+
+你的任务：
+- 对于报告中指出的每个 null 字段，仔细搜索论文全文
+- 如果确实能找到该字段的值（如年龄下限、性别比例、国家等），将 null 替换为正确值
+- 如果论文中确实没有报告该信息，保持 null 不变
+- 不要修改报告中未提及的字段
+- 不要捏造任何数值——只填入论文中明确存在的信息
+- 特别关注：入排标准中的年龄范围、表格中的人口统计学数据、方法部分的研究地区
+
+输出严格 JSON，结构与输入完全一致。
 """
 
 
@@ -84,6 +103,91 @@ def review_with_hard_match(
             file=sys.stderr,
         )
         return extracted_block
+
+
+def review_null_completeness(
+    extracted_block: Dict,
+    block_name: str,
+    null_report: str,
+    pdf_text: str,
+    client: GLMClient,
+) -> Dict:
+    """
+    Review null fields that may have values available in the paper.
+    Uses a specialized prompt that focuses on filling in missing data.
+    """
+    if "All values passed" in null_report:
+        return extracted_block
+
+    prompt = f"""## 待补全的数据块: {block_name}
+
+```json
+{json.dumps(extracted_block, ensure_ascii=False, indent=2)}
+```
+
+## 空值完整性检查报告
+
+以下字段当前为 null，但论文中可能存在对应值：
+
+{null_report}
+
+## 补全要求
+
+1. 对于报告中的每个 WARNING，在论文全文中仔细搜索对应信息
+2. 重点搜索位置：
+   - 入排标准（Inclusion/Exclusion criteria）→ 年龄范围
+   - Table 1 / Baseline characteristics → 人口统计学数据
+   - Methods / Study design → 研究地区、国家
+   - CONSORT flow diagram → 样本量
+3. 如果找到确切值，填入对应字段
+4. 如果确实找不到，保持 null
+5. 不要修改报告中未提及的字段
+6. 不要捏造数值
+
+## 论文原文
+
+{pdf_text}
+
+## 输出
+
+输出补全后的完整 JSON（与输入结构一致）。只输出 JSON，不要其他内容。"""
+
+    corrected = client.call_json(prompt, system_prompt=_NULL_REVIEW_SYSTEM_PROMPT)
+    if isinstance(corrected, dict):
+        # Log what changed
+        _log_null_fills(extracted_block, corrected, block_name)
+        return corrected
+    else:
+        print(
+            f"  [Review] {block_name} null-completeness: LLM returned non-dict, keeping original",
+            file=sys.stderr,
+        )
+        return extracted_block
+
+
+def _log_null_fills(original: Dict, corrected: Dict, block_name: str) -> None:
+    """Log fields that changed from null to a value."""
+    fills = []
+    _diff_nulls(original, corrected, "", fills)
+    if fills:
+        print(f"  [Review] {block_name} null-completeness: filled {len(fills)} fields", file=sys.stderr)
+        for path, val in fills:
+            print(f"    {path}: null -> {val}", file=sys.stderr)
+    else:
+        print(f"  [Review] {block_name} null-completeness: no new values found", file=sys.stderr)
+
+
+def _diff_nulls(orig: Any, corr: Any, path: str, fills: List) -> None:
+    """Recursively find fields that changed from null to non-null."""
+    if isinstance(orig, dict) and isinstance(corr, dict):
+        for k in orig:
+            if k in corr:
+                _diff_nulls(orig[k], corr[k], f"{path}.{k}" if path else k, fills)
+    elif isinstance(orig, list) and isinstance(corr, list):
+        for i in range(min(len(orig), len(corr))):
+            _diff_nulls(orig[i], corr[i], f"{path}[{i}]", fills)
+    elif orig is None and corr is not None:
+        fills.append((path, corr))
 
 
 def review_effects_with_context(

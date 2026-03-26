@@ -661,11 +661,18 @@
         // 【判定规则】：
         // higher_better:
         // - 生存类指标：overall survival, progression-free survival
-        // - 响应率：response rate, remission rate
+        // - 响应率/达标率：response rate, remission rate, proportion achieving goal,
+        //   goal attainment rate, percentage meeting target, proportion reaching threshold
+        //   （本质是 response rate：达到目标的人越多越好）
         // - 功能改善：quality of life score（若明确为“更高更好”）
         // lower_better:
         // - 疾病负担/风险：HbA1c, blood pressure, tumor size
+        // - 生物标志物水平变化量：change in LDL-C, change in blood pressure（降低越多越好）
         // - 事件发生：mortality rate, relapse rate, adverse events
+        //【关键区分示例】：
+        // - "Change in LDL-C from baseline"（水平变化量）→ lower_better
+        // - "Proportion of patients achieving LDL-C goals"（达标比例）→ higher_better
+        // - 同一生物标志物（如 LDL-C），"水平变化"和"达标率"polarity 方向相反
         // neutral:
         // - 仅为描述性指标（无明确好坏方向），如：drug concentration, biomarker level（未说明意义）
         // unclear:

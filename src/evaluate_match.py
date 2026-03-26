@@ -102,6 +102,169 @@ class HardMatchEvaluator:
         self.pdf_text = pdf_text
         self.anchor_set = extract_anchor_numbers(pdf_text)
 
+    # -------------------------------------------------------------------
+    # Null-field completeness checks
+    # -------------------------------------------------------------------
+
+    def _find_number_near_keyword(
+        self, keywords: List[str], max_distance: int = 120
+    ) -> Optional[str]:
+        """
+        Search pdf_text for a number appearing near any of the given keywords.
+        Returns the first plausible candidate string, or None.
+        """
+        text = self.pdf_text.replace("\n", " ")
+        for kw in keywords:
+            for m in re.finditer(re.escape(kw), text, re.IGNORECASE):
+                window_start = max(0, m.start() - max_distance)
+                window_end = min(len(text), m.end() + max_distance)
+                window = text[window_start:window_end]
+                nums = re.findall(r"(?<![a-zA-Z])(\d+\.?\d*)", window)
+                if nums:
+                    return nums[0]
+        return None
+
+    def check_null_completeness(self, pico: Dict) -> List[MatchResult]:
+        """
+        Check for fields left as null that may actually be available in the paper.
+        This produces WARNINGs (not ERRORs) — hints for the review step.
+        """
+        results = []
+        population = pico.get("population", {})
+        base_pop = population.get("base_population", {})
+
+        # --- Age range ---
+        age = base_pop.get("age", {})
+        if isinstance(age, dict):
+            if age.get("range_min") is None:
+                candidate = self._find_number_near_keyword(
+                    ["age ≥", "age >=", "aged ≥", "aged >=", "≥ ", "years or older",
+                     "minimum age", "age range", "18 years", "age ⩾", "older than"]
+                )
+                if candidate:
+                    results.append(
+                        MatchResult(
+                            field_path="pico.population.base_population.age.range_min",
+                            value=None,
+                            found=True,
+                            severity=MatchSeverity.WARNING,
+                            message=f"age.range_min is null but paper may contain age "
+                            f"lower bound (found '{candidate}' near age keywords). "
+                            f"Check if an age eligibility criterion exists.",
+                            candidates=[candidate],
+                        )
+                    )
+
+            if age.get("range_max") is None:
+                candidate = self._find_number_near_keyword(
+                    ["age ≤", "age <=", "aged ≤", "aged <=", "≤ ", "years or younger",
+                     "maximum age", "younger than", "up to"]
+                )
+                if candidate:
+                    results.append(
+                        MatchResult(
+                            field_path="pico.population.base_population.age.range_max",
+                            value=None,
+                            found=True,
+                            severity=MatchSeverity.WARNING,
+                            message=f"age.range_max is null but paper may contain age "
+                            f"upper bound (found '{candidate}' near age keywords). "
+                            f"Check if an age eligibility criterion exists.",
+                            candidates=[candidate],
+                        )
+                    )
+
+        # --- Sex percentage ---
+        sex = base_pop.get("sex", {})
+        if isinstance(sex, dict):
+            if sex.get("female_percent") is None and sex.get("male_percent") is not None:
+                male_pct = sex["male_percent"]
+                try:
+                    inferred = round(100.0 - float(male_pct), 1)
+                    results.append(
+                        MatchResult(
+                            field_path="pico.population.base_population.sex.female_percent",
+                            value=None,
+                            found=True,
+                            severity=MatchSeverity.WARNING,
+                            message=f"female_percent is null but male_percent={male_pct}. "
+                            f"Consider setting female_percent={inferred} (100 - male_percent).",
+                            candidates=[str(inferred)],
+                        )
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+            if sex.get("male_percent") is None and sex.get("female_percent") is not None:
+                female_pct = sex["female_percent"]
+                try:
+                    inferred = round(100.0 - float(female_pct), 1)
+                    results.append(
+                        MatchResult(
+                            field_path="pico.population.base_population.sex.male_percent",
+                            value=None,
+                            found=True,
+                            severity=MatchSeverity.WARNING,
+                            message=f"male_percent is null but female_percent={female_pct}. "
+                            f"Consider setting male_percent={inferred} (100 - female_percent).",
+                            candidates=[str(inferred)],
+                        )
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+        # --- Sample size ---
+        if base_pop.get("sample_size") is None:
+            candidate = self._find_number_near_keyword(
+                ["enrolled", "included", "participants", "patients", "subjects",
+                 "sample size", "n =", "N =", "ITT", "intention-to-treat"]
+            )
+            if candidate:
+                results.append(
+                    MatchResult(
+                        field_path="pico.population.base_population.sample_size",
+                        value=None,
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"sample_size is null but paper may contain sample "
+                        f"size (found '{candidate}' near enrollment keywords).",
+                        candidates=[candidate],
+                    )
+                )
+
+        # --- Region ---
+        region = base_pop.get("region", {})
+        if isinstance(region, dict) and not region.get("country_list"):
+            # Quick scan for common country patterns
+            country_keywords = [
+                "United States", "USA", "UK", "United Kingdom", "China", "Japan",
+                "Germany", "France", "Italy", "Spain", "Canada", "Australia",
+                "Brazil", "India", "Korea", "Netherlands", "Sweden", "Denmark",
+                "Norway", "Finland", "Belgium", "Switzerland", "Austria", "Poland",
+                "Israel", "Turkey", "Mexico", "Argentina", "South Africa",
+                "Russia", "Taiwan", "Hong Kong", "Singapore",
+            ]
+            found_countries = []
+            text_lower = self.pdf_text.lower()
+            for country in country_keywords:
+                if country.lower() in text_lower:
+                    found_countries.append(country)
+            if found_countries:
+                results.append(
+                    MatchResult(
+                        field_path="pico.population.base_population.region.country_list",
+                        value=[],
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"country_list is empty but paper mentions: "
+                        f"{', '.join(found_countries[:5])}. "
+                        f"Check if study region is reported.",
+                        candidates=found_countries[:5],
+                    )
+                )
+
+        return results
+
     def check_value(self, value: Any, field_path: str) -> Optional[MatchResult]:
         if value is None:
             return None
@@ -402,6 +565,67 @@ class HardMatchEvaluator:
                         found=True,
                         severity=MatchSeverity.WARNING,
                         message=f"Estimate {eid} has invalid direction='{direction}'. Valid: {_VALID_DIRECTIONS}",
+                    )
+                )
+
+        return results
+
+    def check_effects_null_completeness(
+        self, effects: List[Dict]
+    ) -> List[MatchResult]:
+        """
+        Check for effect_estimates with p_value but missing value/CI.
+        This is a common extraction failure: LLM finds p-values but skips
+        the actual between-group difference values from tables.
+        """
+        results = []
+        for i, est in enumerate(effects):
+            prefix = f"effect_estimates[{i}]"
+            eid = est.get("estimate_id", f"E{i+1}")
+
+            has_p = est.get("p_value") is not None
+            has_value = est.get("value") is not None
+            ci = est.get("ci", {}) or {}
+            has_ci = ci.get("lower") is not None or ci.get("upper") is not None
+
+            # If we have p_value but no value, something is likely missing
+            if has_p and not has_value:
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.value",
+                        value=None,
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"Estimate {eid} has p_value={est.get('p_value')} "
+                        f"but value is null. Check the paper's tables for "
+                        f"the between-group difference / effect size. "
+                        f"Look for 'Difference' or 'vs placebo' rows in tables.",
+                    )
+                )
+
+            if has_p and not has_ci:
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.ci",
+                        value=None,
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"Estimate {eid} has p_value={est.get('p_value')} "
+                        f"but CI is missing. Check the paper's tables for "
+                        f"confidence interval values (often in parentheses).",
+                    )
+                )
+
+            # If we have value but no CI, also flag
+            if has_value and not has_ci:
+                results.append(
+                    MatchResult(
+                        field_path=f"{prefix}.ci",
+                        value=None,
+                        found=True,
+                        severity=MatchSeverity.WARNING,
+                        message=f"Estimate {eid} has value={est.get('value')} "
+                        f"but CI is missing. Check if paper reports confidence intervals.",
                     )
                 )
 

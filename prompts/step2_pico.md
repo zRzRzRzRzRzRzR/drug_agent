@@ -54,6 +54,20 @@
 - 若 role = "safety"（如 adverse events、tolerability），**polarity 必须填 "neutral"**
 - 不要将安全性指标的 polarity 标为 "lower_better"
 
+**⚠️ Polarity 判定扩展规则**：
+- `higher_better` 适用于：
+  - 生存类指标：overall survival, progression-free survival, time-to-event endpoints
+  - **响应率/达标率**：response rate, remission rate, **proportion achieving goal**, **proportion meeting target**, **goal attainment rate**, **percentage of patients reaching threshold**
+  - 功能改善：quality of life score（明确更高更好时）
+- `lower_better` 适用于：
+  - 疾病负担/风险：HbA1c, blood pressure, LDL-C **水平/变化量**（注意区分 LDL-C 水平 vs 达标比例）
+  - 事件发生率：mortality rate, relapse rate, MACE
+- **关键区分**：
+  - "Change in LDL-C from baseline" → **lower_better**（降低越多越好）
+  - "Proportion of patients achieving LDL-C goals" → **higher_better**（达标越多越好，本质是 response rate）
+  - "Time to progression" → **higher_better**（越久越好）
+  - "Incidence of adverse events" → **neutral**（安全性指标）
+
 **⚠️ Phase 1 / 探索性试验的 outcome.role 规则**：
 - 如果论文明确标注了 primary/secondary endpoint → 按原文填写
 - 如果论文**未明确标注** primary/secondary，但属于 Phase 1 剂量探索 → role 填 "exploratory"
@@ -76,9 +90,13 @@
 
 2. **sex percent 互补**：论文报告了 female% 但没有 male%，可以用 100% − female%。反之亦然。
    - **必须同时填写 female_percent 和 male_percent**（如果论文报告了其中一个）
+   - 例如：论文只报告 "67.7% male" → male_percent = 67.7, female_percent = 32.3
 
 3. **age 统计量**：论文如果同时报告了 mean 和 SD，两个都填。如果报告了 range（如 18-75），填 range_min 和 range_max。
    - **不要只填 range 而遗漏 mean±SD**（如果论文两者都报告了）
+   - **不要只填 mean±SD 而遗漏 range_min**：如果入排标准写了 "aged ≥ 18 years" 或 "18 years or older"，则 range_min = 18
+   - 搜索位置：Inclusion criteria、Eligibility criteria、Methods → Study population
+   - **age.range_min 是高频遗漏字段，请特别留意**
 
 4. **其他数值一律不允许计算**。
 

@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .evaluate_match import HardMatchEvaluator
 from .llm_client import GLMClient
-from .review import review_effects_with_context, review_with_hard_match
+from .review import review_effects_with_context, review_null_completeness, review_with_hard_match
 
 _SRC_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SRC_DIR.parent
@@ -144,6 +144,72 @@ def step0_split(client: GLMClient, pdf_text: str) -> Dict:
 # ---------------------------------------------------------------------------
 
 
+def _repair_linkage_design(result: Dict, schema: Dict) -> Dict:
+    """
+    Repair malformed step1 output.
+
+    Known failure modes:
+      - LLM flattens the nested structure (e.g. "trial_linkage: {nct_ids: [" as a key)
+      - Missing top-level keys (trial_linkage or design absent)
+      - design.reported missing entirely
+    """
+    expected_linkage = _extract_empty_block(schema, "trial_linkage")
+    expected_design = _extract_empty_block(schema, "design")
+    repaired = False
+
+    # --- Check if trial_linkage is properly nested ---
+    if "trial_linkage" not in result or not isinstance(result.get("trial_linkage"), dict):
+        # Try to salvage from malformed keys
+        linkage = dict(expected_linkage)  # start from defaults
+        flat_keys = list(result.keys())
+        for k in flat_keys:
+            # Detect mangled keys like "trial_linkage: {nct_ids: ["
+            if "nct" in k.lower() or "trial_linkage" in k.lower():
+                val = result[k]
+                # The value might be the NCT ID itself
+                if isinstance(val, str) and val.startswith("NCT"):
+                    linkage["nct_ids"] = [val]
+                elif isinstance(val, list):
+                    linkage["nct_ids"] = val
+            elif k in ("pmid", "doi", "pmcid"):
+                linkage[k] = result[k]
+        result["trial_linkage"] = linkage
+        repaired = True
+
+    # Ensure all linkage fields exist
+    tl = result["trial_linkage"]
+    for field in ("nct_ids", "pmid", "doi", "pmcid"):
+        if field not in tl:
+            tl[field] = expected_linkage[field]
+
+    # --- Check if design is properly nested ---
+    if "design" not in result or not isinstance(result.get("design"), dict):
+        result["design"] = dict(expected_design)
+        repaired = True
+
+    design = result["design"]
+    if "reported" not in design or not isinstance(design.get("reported"), dict):
+        # Maybe the LLM put design fields at the top level of design
+        reported = {}
+        for field in ("randomized", "blinding", "allocation", "multicenter"):
+            if field in design:
+                reported[field] = design.pop(field)
+            else:
+                reported[field] = "unclear"
+        design["reported"] = reported
+        repaired = True
+
+    # Ensure all reported fields exist
+    for field in ("randomized", "blinding", "allocation", "multicenter"):
+        if field not in design["reported"]:
+            design["reported"][field] = "unclear"
+
+    if repaired:
+        print("[Step 1] WARNING: Repaired malformed LLM output", file=sys.stderr)
+
+    return result
+
+
 def step1_linkage_design(
     client: GLMClient,
     pdf_text: str,
@@ -169,6 +235,7 @@ def step1_linkage_design(
     full_prompt = full_prompt.replace("{paper_text}", pdf_text)
 
     result = client.call_json(full_prompt)
+    result = _repair_linkage_design(result, schema)
     print(
         f"[Step 1] NCT={result.get('trial_linkage', {}).get('nct_ids', [])}",
         file=sys.stderr,
@@ -184,6 +251,69 @@ def step1_linkage_design(
 # ---------------------------------------------------------------------------
 # Step 2
 # ---------------------------------------------------------------------------
+
+
+def _repair_pico(pico: Dict) -> Dict:
+    """
+    Repair common PICO structural issues:
+    - population_id not being "P0" for base_population
+    - Missing sex percent complement (have male but not female, or vice versa)
+    - Ensure population/outcomes exist as proper structures
+    """
+    repaired = False
+
+    # Ensure population structure exists
+    if "population" not in pico:
+        pico["population"] = {"base_population": {}, "analysis_populations": []}
+        repaired = True
+
+    pop = pico["population"]
+    if "base_population" not in pop:
+        pop["base_population"] = {}
+        repaired = True
+
+    bp = pop["base_population"]
+
+    # Fix population_id: must be "P0"
+    pid = bp.get("population_id")
+    if pid != "P0":
+        bp["population_id"] = "P0"
+        if pid is not None:
+            print(f"[Step 2] Repair: base_population.population_id '{pid}' -> 'P0'", file=sys.stderr)
+        repaired = True
+
+    # Fill sex complement if one side is missing
+    sex = bp.get("sex")
+    if isinstance(sex, dict):
+        male = sex.get("male_percent")
+        female = sex.get("female_percent")
+        if male is not None and female is None:
+            try:
+                sex["female_percent"] = round(100.0 - float(male), 1)
+                print(f"[Step 2] Repair: female_percent = {sex['female_percent']} (100 - {male})", file=sys.stderr)
+                repaired = True
+            except (ValueError, TypeError):
+                pass
+        elif female is not None and male is None:
+            try:
+                sex["male_percent"] = round(100.0 - float(female), 1)
+                print(f"[Step 2] Repair: male_percent = {sex['male_percent']} (100 - {female})", file=sys.stderr)
+                repaired = True
+            except (ValueError, TypeError):
+                pass
+
+    # Ensure analysis_populations is a list
+    if "analysis_populations" not in pop:
+        pop["analysis_populations"] = []
+
+    # Ensure outcomes is a list
+    if "outcomes" not in pico:
+        pico["outcomes"] = []
+
+    if repaired:
+        print("[Step 2] WARNING: Repaired PICO structure", file=sys.stderr)
+
+    return pico
 
 
 def step2_pico(
@@ -207,6 +337,7 @@ def step2_pico(
     full_prompt = full_prompt.replace("{paper_text}", pdf_text)
 
     pico = client.call_json(full_prompt)
+    pico = _repair_pico(pico)
 
     print("[Step 2] Running hard-match on PICO ...", file=sys.stderr)
     match_results = evaluator.check_pico(pico)
@@ -226,6 +357,28 @@ def step2_pico(
         report_2 = evaluator.generate_structured_report(match2)
         print(f"[Step 2] After review: {report_2['errors']} errors", file=sys.stderr)
         report["after_review"] = report_2
+
+    # --- Null completeness check: catch missing-but-available values ---
+    null_results = evaluator.check_null_completeness(pico)
+    n_null_warnings = len(null_results)
+    if n_null_warnings > 0:
+        print(
+            f"[Step 2] Null-completeness: {n_null_warnings} potential missing values detected",
+            file=sys.stderr,
+        )
+        null_report = evaluator.generate_error_report(null_results)
+        pico = review_null_completeness(pico, "pico", null_report, pdf_text, client)
+        report["null_completeness"] = {
+            "warnings": n_null_warnings,
+            "details": [
+                {
+                    "field_path": r.field_path,
+                    "message": r.message,
+                    "candidates": r.candidates,
+                }
+                for r in null_results
+            ],
+        }
 
     _print_pico_summary(pico)
     return pico, report
@@ -466,6 +619,27 @@ def step4_effects(
         print(f"[Step 4] After review: {report_2['errors']} errors", file=sys.stderr)
         report["after_review"] = report_2
 
+    # --- Null completeness check: catch missing value/CI ---
+    if effects:
+        null_results = evaluator.check_effects_null_completeness(effects)
+        n_null = len(null_results)
+        if n_null > 0:
+            print(
+                f"[Step 4] Null-completeness: {n_null} potential missing values in effect_estimates",
+                file=sys.stderr,
+            )
+            null_report = evaluator.generate_error_report(null_results)
+            effects = review_effects_with_context(
+                effects, null_report, pdf_text, client, pico, structure
+            )
+            report["null_completeness"] = {
+                "warnings": n_null,
+                "details": [
+                    {"field_path": r.field_path, "message": r.message}
+                    for r in null_results
+                ],
+            }
+
     print(f"[Step 4] Final: {len(effects)} effect estimates", file=sys.stderr)
     return effects, report
 
@@ -547,9 +721,23 @@ def step6_merge(
     mechanism: Dict,
     study_info: Optional[Dict] = None,
 ) -> Dict:
+    # Warn if critical blocks are empty (indicates upstream failure)
+    tl = linkage_design.get("trial_linkage", {})
+    design = linkage_design.get("design", {})
+    if not tl or tl == {}:
+        print(
+            "[Step 6] WARNING: trial_linkage is empty — step1 may have failed",
+            file=sys.stderr,
+        )
+    if not design or design == {} or not design.get("reported"):
+        print(
+            "[Step 6] WARNING: design is empty — step1 may have failed",
+            file=sys.stderr,
+        )
+
     final = {
-        "trial_linkage": linkage_design.get("trial_linkage", {}),
-        "design": linkage_design.get("design", {}),
+        "trial_linkage": tl,
+        "design": design,
         "pico": pico,
         "trial_structure": structure,
         "effect_estimates": effects,

@@ -78,6 +78,12 @@
   - "Difference (percentage points)" → vs placebo 差异，**这才是** effect estimate 的 value
 - **value 应来自 "Difference" 行**
 
+### ⚠️ value 和 CI 不允许为空（如果 p_value 存在）
+- 如果你能找到 p_value，那么论文一定也报告了 value 和/或 CI
+- **p_value 存在而 value = null 是提取遗漏**，请回到 Table 仔细查找
+- 典型位置："Difference vs. placebo" 行、"Between-group difference" 行、Forest plot 数据
+- 如果确实在论文中找不到 between-group difference 的数值，则 p_value 也应设为 null（不要只提取 p 值而遗漏效应值）
+
 ### p_value 的处理
 - 论文 Table 注释通常会说 "†P<0.05, ‡P<0.001, §P<0.01" 等
 - 有标记且注释说 ‡P<0.001 → p_value 填 `0.001`（取上界）
