@@ -86,7 +86,10 @@ def process_single_file(
 
 
 def collect_files_from_dir(directory: Path) -> list[Path]:
-    return sorted(directory.glob("*.pdf"))
+    pdf_subdir = directory / "pdfs"
+    if pdf_subdir.is_dir():
+        return sorted(pdf_subdir.glob("*.pdf"))
+    return sorted(directory.glob("*.pdf"))  # fallback
 
 
 def collect_batches(input_dir: Path) -> dict[str, list[Path]]:
