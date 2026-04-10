@@ -202,31 +202,16 @@ cp .env.example .env
 
 ```bash
 # 处理指定子文件夹
-python batch_run.py \
-  -i /mnt/drug_pdf/S/ \
-  -o output_0320 \
-  --batches 00 \
-  --resume
+python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --batches 00
 
 # 限制每批处理数量
-python batch_run.py \
-  -i /mnt/drug_pdf/S/ \
-  -o output_0320 \
-  --batch-size 5
+python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --batch-size 5
 
 # 多线程并发
-python batch_run.py \
-  -i /mnt/drug_pdf/S/ \
-  -o output_0320 \
-  --batches 00 01 \
-  --max-workers 4
+python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --batches batch_00101 batch_00102 batch_00103 batch_00104 batch_00105
 
 # 复用已有 OCR 缓存
-python batch_run.py \
-  -i /mnt/drug_pdf/S/ \
-  -o output_0320 \
-  --ocr-dir /path/to/existing/cache_ocr \
-  --resume
+python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --ocr-dir ./cache_ocr
 ```
 
 ### 常用参数
@@ -236,7 +221,7 @@ python batch_run.py \
 | `-i`, `--input-dir` | 输入目录，支持平铺 PDF 或含子文件夹（默认 `./evidence_card`） |
 | `-o`, `--output-dir` | 输出目录（默认 `./output`）                        |
 | `--batch-size` | 每批最多处理 N 个新 PDF（0 = 不限制，默认 0）              |
-| `--batches` | 只处理指定的子文件夹（如 `--batches 00 01`，默认全部）       |
+| `--batches` | 只处理指定的子文件夹（如 `--batches batch_00001`，默认全部） |
 | `--max-workers` | 并发线程数（默认 1，即串行）                            |
 | `--model` | 覆盖默认 LLM 模型名                               |
 | `--api-key` | 覆盖环境变量中的 API Key                           |

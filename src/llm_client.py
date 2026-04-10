@@ -71,6 +71,9 @@ class GLMClient:
 
         if not thinking:
             kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        else:
+            if "minimax" in self.model.lower():
+                kwargs["extra_body"] = {"reasoning_split": True}
 
         response = self.client.chat.completions.create(**kwargs)
         return response.choices[0].message.content

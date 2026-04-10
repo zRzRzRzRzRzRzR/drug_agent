@@ -2,7 +2,8 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
-
+import math
+MAX_VAL = 10000000
 
 class MatchSeverity(str, Enum):
     ERROR = "error"
@@ -58,6 +59,8 @@ def hard_match_value(val: Any, anchor_set: Set[str], pdf_text: str) -> bool:
         f"{num:.3f}",
         f"{num:g}",
     ]
+    if not math.isfinite(num):
+        num = MAX_VAL if num > 0 else -MAX_VAL
     if num == int(num) and abs(num) < 100000:
         candidates.append(str(int(num)))
     if 0 < abs(num) < 1:
