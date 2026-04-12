@@ -1,9 +1,11 @@
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
-import math
+
 MAX_VAL = 10000000
+
 
 class MatchSeverity(str, Enum):
     ERROR = "error"

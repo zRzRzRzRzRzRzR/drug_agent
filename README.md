@@ -155,9 +155,9 @@ Step 6 → final.json + verification_reports.json
 ├── src/
 │   ├── __init__.py          # 公共导出
 │   ├── pipeline.py          # 七步流水线 (Step 0-6) + Step 3.5 跨层映射 + 缓存/resume
-│   ├── evaluate_match.py    # 硬匹配验证 + ID 前缀校验 + 枚举校验 + 一致性检查
-│   ├── review.py            # Review Agent（基于硬匹配错误报告的 LLM 修正）
-│   ├── llm_client.py        # LLM 客户端（OpenAI 兼容 API）
+│   ├── evaluate_match.py    # 硬匹配验证 + ID 前缀校验 + 枚举校验 + 一致性检查 + 空值完整性
+│   ├── review.py            # Review Agent（硬匹配修正 + 空值完整性审核 + 带上下文审核）
+│   ├── llm_client.py        # LLM 客户端（OpenAI 兼容 API + 独立 Vision 客户端）
 │   └── ocr.py               # PDF → 图片 → GLM-OCR → Markdown
 ├── prompts/                 # LLM 提示词模板（.md 文件，含 {annotation_guidance} 占位符）
 │   ├── step0_split.md
@@ -169,9 +169,13 @@ Step 6 → final.json + verification_reports.json
 ├── template/                # Schema 定义
 │   ├── schema.json          # 目标 JSON schema（空骨架，LLM 填空用）
 │   └── schema_annotation.json  # Schema 字段级标注规范（枚举值 + 判定规则 + 注意事项）
+├── reference/               # 参考数据集（PDF + 预期 JSON 输出）
+│   ├── multi_case_0/        # 多研究论文样例
+│   └── single_case_0~8/     # 单研究论文样例
 ├── batch_run.py             # 批处理脚本（支持子文件夹 batch 模式）
 ├── requirements.txt
-└── .env                     # API 配置
+├── .env                     # API 配置（需从 .env.example 复制）
+└── .env.example             # API 配置模板
 ```
 
 ## 环境配置
@@ -184,11 +188,14 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env：
 #   OPENAI_API_KEY=your_api_key
-#   OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
-#   DEFAULT_MODEL=glm-5
-#   DEFAULT_TEMPERATURE=0.1
-#   DEFAULT_MAX_TOKENS=16384
+#   OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+#   DEFAULT_MODEL=glm-4.7-flashx
+#   DEFAULT_TEMPERATURE=1.0
+#   DEFAULT_MAX_TOKENS=32678
+#   VISION_API_KEY=your_vision_api_key
+#   VISION_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 #   VISION_MODEL=glm-4.6v
+#   GLMOCR_API_KEY=your_glmocr_api_key
 ```
 
 ## 运行方式
@@ -314,8 +321,10 @@ python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 
 | `check_pico()` | Step 2 | sample_size, age, sex percent, timepoint |
 | `check_pico_consistency()` | Step 2 | sub-pop size ≤ base size; safety outcome polarity = neutral (v2) |
 | `check_design_consistency()` | Step 1+2 | single-arm ↔ comparators=[] 一致性 (v2) |
+| `check_null_completeness()` | Step 2 | PICO 空值完整性检查（null 字段是否在论文中有对应值） |
 | `check_trial_structure()` | Step 3 | dose/duration/sample_size + arm↔regimen 引用 |
 | `check_effect_estimates()` | Step 4 | value/CI/p_value + comparison/outcome/population ID 引用 + estimate_type/direction 枚举 (v2) |
+| `check_effects_null_completeness()` | Step 4 | 效应估计空值完整性检查（null 字段是否在论文中有对应值） |
 | `check_mechanism_evidence()` | Step 5 | biomarker value/CI/p_value + ID 前缀校验 TA\*/B\*/MC\* (v2) + action_type 枚举 (v2) + scope 单值 (v2) |
 
 **Anchor 提取逻辑**：从论文全文用正则提取所有数字，生成多种字符串表示（`0.85` → `"0.85"`, `"0.850"`, `".85"` 等），构建 O(1) 查找集合。
@@ -354,6 +363,14 @@ schema_annotation.json
 3. LLM 被要求：找到正确值替换，或设为 null
 4. 修正后再次运行硬匹配验证，确认修正有效
 
+提供三个审核函数：
+
+| 函数 | 适用步骤 | 说明 |
+|------|---------|------|
+| `review_with_hard_match()` | Step 2/3/4/5 | 基于硬匹配错误报告修正数值 |
+| `review_null_completeness()` | Step 2/4 | 空值完整性审核（检查 null 字段是否在论文中有对应值） |
+| `review_effects_with_context()` | Step 4 | 带上下文（PICO + trial_structure）的效应估计审核 |
+
 ### 分步 LLM 调用策略
 
 | 步骤 | 输入上下文 | 说明 |
@@ -370,7 +387,7 @@ schema_annotation.json
 
 ### OCR 模块（`ocr.py`）
 
-1. PDF → 高分辨率图片（PyMuPDF, 默认 200 DPI）
+1. PDF → 高分辨率图片（PyMuPDF, 默认 400 DPI）
 2. 尾页过滤（GLM-4V 识别参考文献/附录页）
 3. GLM-OCR 识别（Markdown 格式输出）
 4. 结果缓存到 `cache_ocr/{pdf_stem}/combined.md`
