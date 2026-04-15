@@ -173,6 +173,7 @@ Step 6 → final.json + verification_reports.json
 │   ├── multi_case_0/        # 多研究论文样例
 │   └── single_case_0~8/     # 单研究论文样例
 ├── batch_run.py             # 批处理脚本（支持子文件夹 batch 模式）
+├── batch_clear.py           # 清理未生成 final.json 的中间状态
 ├── requirements.txt
 ├── .env                     # API 配置（需从 .env.example 复制）
 └── .env.example             # API 配置模板
@@ -221,23 +222,29 @@ python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 
 python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --ocr-dir ./cache_ocr
 ```
 
-### 常用参数
+### 清理中间状态
 
-| 参数 | 说明                                         |
-|------|--------------------------------------------|
-| `-i`, `--input-dir` | 输入目录，支持平铺 PDF 或含子文件夹（默认 `./evidence_card`） |
-| `-o`, `--output-dir` | 输出目录（默认 `./output`）                        |
-| `--batch-size` | 每批最多处理 N 个新 PDF（0 = 不限制，默认 0）              |
-| `--batches` | 只处理指定的子文件夹（如 `--batches batch_00001`，默认全部） |
-| `--max-workers` | 并发线程数（默认 1，即串行）                            |
-| `--model` | 覆盖默认 LLM 模型名                               |
-| `--api-key` | 覆盖环境变量中的 API Key                           |
-| `--base-url` | 覆盖环境变量中的 Base URL                          |
-| `--ocr-dir` | OCR 缓存目录（默认 `./cache_ocr`）                 |
-| `--dpi` | PDF 转图片 DPI（默认 400）                        |
-| `--no-validate-pages` | 跳过 OCR 尾页过滤                                |
-| `--resume` | 跳过已完成的文件（检查 `final.json` 是否存在）             |
+当需要删除未成功生成 `final.json` 的中间结果时，使用 `batch_clear.py`：
 
+```bash
+# 预览将要清理的内容（不实际删除）
+python batch_clear.py -o output_0410 --dry-run
+
+# 清理全部一级子文件夹
+python batch_clear.py -o output_0410
+
+# 只清理指定一级子文件夹
+python batch_clear.py -o output_0410 --batches 00 batch_00001
+
+# 按范围清理（含起止）
+python batch_clear.py -o output_0410 --start batch_00001 --end batch_00010
+```
+
+逻辑说明：
+1. 遍历输出根目录下的一级子文件夹（如 `batch_00001`、`00`）。
+2. 对每个一级子文件夹下的二级子文件夹（如 `PDF_000001`）进行检查。
+3. 若二级子文件夹中已存在 `final.json` 或 `final_1.json`，则**跳过**。
+4. 否则**清空该二级子文件夹内的所有内容**（保留空文件夹）。
 
 ## 输出说明
 
