@@ -169,6 +169,8 @@ def _repair_linkage_design(result: Dict, schema: Dict) -> Dict:
         linkage = dict(expected_linkage)  # start from defaults
         flat_keys = list(result.keys())
         for k in flat_keys:
+            if not isinstance(k, str):
+                continue
             # Detect mangled keys like "trial_linkage: {nct_ids: ["
             if "nct" in k.lower() or "trial_linkage" in k.lower():
                 val = result[k]
