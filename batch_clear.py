@@ -20,9 +20,13 @@ def clear_directory(dir_path: Path, dry_run: bool = False, indent: str = "") -> 
 
 
 def main():
-    parser = argparse.ArgumentParser(description="清理未生成 final.json 的中间状态文件夹")
+    parser = argparse.ArgumentParser(
+        description="清理未生成 final.json 的中间状态文件夹"
+    )
     parser.add_argument("-o", "--output-dir", default="./output")
-    parser.add_argument("--batches", nargs="*", default=None, help="只清理指定的一级子文件夹名称")
+    parser.add_argument(
+        "--batches", nargs="*", default=None, help="只清理指定的一级子文件夹名称"
+    )
     parser.add_argument("--start", default=None, help="起始一级子文件夹名称（包含）")
     parser.add_argument("--end", default=None, help="结束一级子文件夹名称（包含）")
     parser.add_argument("--dry-run", action="store_true")
@@ -63,7 +67,9 @@ def main():
         print(f"\n[{first_dir.name}]", file=sys.stderr)
         second_level_dirs = sorted([d for d in first_dir.iterdir() if d.is_dir()])
         for second_dir in second_level_dirs:
-            if (second_dir / "final.json").exists() or (second_dir / "final_1.json").exists():
+            if (second_dir / "final.json").exists() or (
+                second_dir / "final_1.json"
+            ).exists():
                 print(f"  SKIP  {second_dir.name} (final.json exists)", file=sys.stderr)
                 total_skipped += 1
                 continue
