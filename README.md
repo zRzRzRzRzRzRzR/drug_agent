@@ -216,8 +216,7 @@ python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 
 python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --batch-size 5
 
 # 多线程并发
-python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --batches batch_00101 batch_00102 batch_00103 batch_00104 batch_00105
-
+python batch_run.py -i /mnt/yuxuan/drug_agent_dataset/uploads/ -o output_0420_glm51/ --max-workers 16 --resume --batches batch_00390 batch_00391 batch_00392 batch_00393 batch_00394 batch_00395 batch_00396 batch_00397 batch_00398 batch_00399
 # 复用已有 OCR 缓存
 python batch_run.py -i drug_agent_dataset/uploads/ -o output_0410 --max-workers 4 --resume --ocr-dir ./cache_ocr
 ```
